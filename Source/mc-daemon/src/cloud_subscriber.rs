@@ -1,13 +1,10 @@
-use std::{ env, process, thread, time::Duration};
+use std::{ env, process, thread, time::Duration, fs::read_to_string};
 
 extern crate paho_mqtt as mqtt;
 
 use crate::{update_parser::UpdateParser, cloud_settings::Settings};
 
 const DFLT_CLIENT:&str = "mc_daemon";
-const DFLT_TOPICS:&[&str] = &["ota", "ota/123456/updates"];
-// The qos list that match topics above.
-const DFLT_QOS:&[i32] = &[0, 1];
 
 pub struct CloudSubscriber {
     settings:Settings
@@ -34,10 +31,18 @@ impl CloudSubscriber {
     }
 
     // Subscribes to multiple topics.
-    fn subscribe_topics(&self, cli: &mqtt::Client) {
-        if let Err(e) = cli.subscribe_many(DFLT_TOPICS, DFLT_QOS) {
-            println!("Error subscribes topics: {:?}", e);
-            process::exit(1);
+    fn subscribe_topics(&self, cli: &mqtt::Client, topics: &Vec<String>) {
+        
+        let machine_id = read_to_string("/etc/machine-id").unwrap();
+
+        for topic in topics {
+            // do macro substitution for '{ID}'
+            let t = topic.replace("{ID}", &machine_id);
+
+            // QOS == 2 means deliver exactly once
+            if let Err(e) = cli.subscribe(t.as_str(), 2) {
+                println!("Error subscribing to {} {:?}", topic, e);
+            }
         }
     }
 
@@ -78,7 +83,7 @@ impl CloudSubscriber {
         }
 
         // Subscribe topics.
-        self.subscribe_topics(&cli);
+        self.subscribe_topics(&cli, &self.settings.mqtt_topics);
 
         println!("Processing requests...");
         for msg in rx.iter() {
@@ -88,8 +93,8 @@ impl CloudSubscriber {
             }
             else if !cli.is_connected() {
                 if self.try_reconnect(&cli) {
-                    println!("Resubscribe topics...");
-                    self.subscribe_topics(&cli);
+                    println!("Resubscribe to topics...");
+                    self.subscribe_topics(&cli, &self.settings.mqtt_topics);
                 } else {
                     break;
                 }
@@ -99,7 +104,7 @@ impl CloudSubscriber {
         // If still connected, then disconnect now.
         if cli.is_connected() {
             println!("Disconnecting");
-            cli.unsubscribe_many(DFLT_TOPICS).unwrap();
+//            cli.unsubscribe_many(DFLT_TOPICS).unwrap();
             cli.disconnect(None).unwrap();
         }
         println!("Exiting");
