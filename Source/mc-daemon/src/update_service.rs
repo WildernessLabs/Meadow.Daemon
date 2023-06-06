@@ -1,9 +1,9 @@
-use std::{thread::{sleep}};
+use std::{thread::{sleep, self}, hash::BuildHasher};
 use tokio::time;
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpdateState {
     Dead,
     Disconnected,
@@ -14,6 +14,64 @@ enum UpdateState {
     UpdateAvailable,
     DownloadingFile,
     UpdateInProgress
+}
+
+struct UpdateStateMachine; 
+
+impl UpdateStateMachine {
+    pub async fn start(settings: CloudSettings, machine_id: String) {
+        let mut state = UpdateState::Dead;
+        sleep(time::Duration::from_secs(settings.connect_retry_seconds));
+
+        // initialize()
+        let mut last_state = state;
+
+        loop {
+            if last_state != state {
+                println!("service state: {:?}", state);
+                last_state = state;
+            }
+
+            match state {
+                UpdateState::Dead => {
+                    state = UpdateState::Disconnected;
+                },
+                UpdateState::Disconnected => {
+                    if settings.use_authentication {
+                        state = UpdateState::Authenticating;
+                    }
+                    else {
+                        state = UpdateState::Connecting;
+                    }
+                }
+                UpdateState::Authenticating => {
+                    // TODO
+                }
+                UpdateState::Connecting => {
+                    let subscriber = CloudSubscriber::new(settings.clone(), machine_id.clone());
+                    thread::spawn(move || {
+                        subscriber.start();
+                    });
+                    
+                    state = UpdateState::Connected;
+                },
+                UpdateState::Connected => {
+                    // TODO
+                },
+                UpdateState::Idle => {
+                    // TODO
+                },
+                UpdateState::DownloadingFile => {
+                    // TODO
+                },
+                UpdateState::UpdateInProgress=> {
+                    // TODO
+                },
+                _ => { } // nothing to do
+            }
+            sleep(time::Duration::from_secs(1));
+        }
+    }
 }
 
 pub struct UpdateService {
@@ -34,40 +92,14 @@ impl UpdateService {
             cloud_subscriber: None}
     }
 
-    pub fn start(&mut self) {
-        self.cloud_subscriber = Some(CloudSubscriber::new(self.settings.clone(), self.machine_id.clone()));
+    pub async fn start(&mut self) {
 
-        tokio::spawn(async move {
-            self.state_machine();
+        // create copies for the thread closure
+        let s = self.settings.clone();
+        let id = self.machine_id.clone();
+
+        tokio::spawn(async {
+            UpdateStateMachine::start(s, id).await;
         });
-    }
-    
-    async fn state_machine(&mut self) {
-        let seconds = self.settings.connect_retry_seconds;
-        let mut interval = time::interval(time::Duration::from_secs(seconds));
-        interval.tick().await;
-
-        // initialize()
-
-        while ! self.stop_service {
-            println!("service state: {:?}", self.state);
-
-            match self.state {
-                UpdateState::Disconnected => {
-                    if self.settings.use_authentication {
-                        self.state = UpdateState::Authenticating;
-                    }
-                    else {
-                        self.state = UpdateState::Connecting;
-                    }
-                }
-                UpdateState::Connecting => {
-//                    m.cloud_subscriber.as_ref().unwrap().start();
-                },
-                _ => {
-                    interval.tick().await;
-                }
-            }
-        }
-    }
+    }    
 }

@@ -38,6 +38,8 @@ impl CloudSubscriber {
             // do macro substitution for '{ID}'
             let t = topic.replace("{ID}", &self.machine_id);
 
+            println!("Subscribing to {}", topic);
+
             // QOS == 2 means deliver exactly once
             if let Err(e) = cli.subscribe(t.as_str(), 2) {
                 println!("Error subscribing to {} {:?}", topic, e);
@@ -57,71 +59,71 @@ impl CloudSubscriber {
         }
     }
 
-    pub async fn start(&self) {
-            tokio::spawn(async move {
-                /* 
-                let host = format!("{}:{}", self.settings.update_server_address, self.settings.update_server_port);
+    pub fn start(&self) {            
+        let host = format!("{}:{}", self.settings.update_server_address, self.settings.update_server_port);
 
-                // Define the set of options for the create.
-                // Use an ID for a persistent session.
-                let create_opts = mqtt::CreateOptionsBuilder::new()
-                    .server_uri(host)
-                    .client_id(DFLT_CLIENT.to_string())
-                    .finalize();
+        // Define the set of options for the create.
+        // Use an ID for a persistent session.
+        let create_opts = mqtt::CreateOptionsBuilder::new()
+            .server_uri(host)
+            .client_id(DFLT_CLIENT.to_string())
+            .finalize();
 
-                // Create a client.
-                let client = mqtt::Client::new(create_opts).unwrap_or_else(|err| {
-                    println!("Error creating the client: {:?}", err);
-                    process::exit(1);
-                });
+        // Create a client.
+        let client = mqtt::Client::new(create_opts).unwrap_or_else(|err| {
+            println!("Error creating the client: {:?}", err);
+            process::exit(1);
+        });
 
-                // Initialize the consumer before connecting.
-                let receiver = client.start_consuming();
+        // Initialize the consumer before connecting.
+        let receiver = client.start_consuming();
 
-                // Define the set of options for the connection.
-                let lwt = mqtt::MessageBuilder::new()
-                    .topic("test")
-                    .payload("Consumer lost connection")
-                    .finalize();
-                let conn_opts = mqtt::ConnectOptionsBuilder::new()
-                    .keep_alive_interval(Duration::from_secs(20))
-                    .clean_session(false)
-                    .will_message(lwt)
-                    .finalize();
+        // Define the set of options for the connection.
+        let lwt = mqtt::MessageBuilder::new()
+            .topic("test")
+            .payload("Consumer lost connection")
+            .finalize();
 
-                // Connect and wait for it to complete or fail.
-                if let Err(e) = client.connect(conn_opts) {
-                    println!("Unable to connect:\n\t{:?}", e);
-                    process::exit(1);
+        let conn_opts = mqtt::ConnectOptionsBuilder::new()
+            .keep_alive_interval(Duration::from_secs(20))
+            .clean_session(false)
+            .will_message(lwt)
+            .finalize();
+
+        println!("making MQTT connection:\n");
+
+        // Connect and wait for it to complete or fail.
+        if let Err(e) = client.connect(conn_opts) {
+            println!("Unable to connect:\n\t{:?}", e);
+            process::exit(1);
+        }
+
+        // Subscribe topics.
+        self.subscribe_topics(&client, &self.settings.mqtt_topics);
+
+        println!("Processing requests...");
+        for msg in receiver.iter() {
+            if let Some(msg) = msg {
+                let update = UpdateParser::parse_message(msg.payload_str().as_ref());
+                println!("{:?}", update);
+            }
+            else if !client.is_connected() {
+                if self.try_reconnect(&client) {
+                    println!("Resubscribe to topics...");
+                    self.subscribe_topics(&client, &self.settings.mqtt_topics);
+                } else {
+                    break;
                 }
+            }
+        }
 
-                // Subscribe topics.
-                self.subscribe_topics(&client, &self.settings.mqtt_topics);
-
-                println!("Processing requests...");
-                for msg in receiver.iter() {
-                    if let Some(msg) = msg {
-                        let update = UpdateParser::parse_message(msg.payload_str().as_ref());
-                        println!("{:?}", update);
-                    }
-                    else if !client.is_connected() {
-                        if self.try_reconnect(&client) {
-                            println!("Resubscribe to topics...");
-                            self.subscribe_topics(&client, &self.settings.mqtt_topics);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                // If still connected, then disconnect now.
-                if client.is_connected() {
-                    println!("Disconnecting");       
-                    self.unsubscribe_topics(&client, &self.settings.mqtt_topics); 
-                    client.disconnect(None).unwrap();
-                }
-                println!("Exiting");
-                */
-            });            
+        // If still connected, then disconnect now.
+        if client.is_connected() {
+            println!("Disconnecting");       
+            self.unsubscribe_topics(&client, &self.settings.mqtt_topics); 
+            client.disconnect(None).unwrap();
+        }
+        println!("Exiting");
+            
     }
 }
