@@ -1,17 +1,20 @@
+use std::fs::read_to_string;
 
 mod cloud_subscriber;
 mod update_parser;
 mod update_descriptor;
 mod cloud_settings;
+mod update_service;
 
 fn main() {
     println!("starting daemon");
 
-    let settings = cloud_settings::Settings::from_file("/etc/meadow.conf");
+    let settings = cloud_settings::CloudSettings::from_file("/etc/meadow.conf");
 
-    let  subscriber = cloud_subscriber::CloudSubscriber::new(settings);
+    let machine_id = read_to_string("/etc/machine-id").unwrap();
 
-    subscriber.start();
+    let update_service = update_service::UpdateService::new(settings, machine_id.clone());
+    update_service.start();
 
     println!("exiting daemon");
 }

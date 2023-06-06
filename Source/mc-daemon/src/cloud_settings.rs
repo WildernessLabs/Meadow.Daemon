@@ -1,7 +1,7 @@
-use std::path::{Path};
-use std::fs::{File, read_to_string};
+use std::fs::{read_to_string};
 
-pub struct Settings {
+#[derive(Clone)]
+pub struct CloudSettings {
     pub enabled: bool,
     pub update_server_address: String,
     pub update_server_port: i32,
@@ -9,13 +9,13 @@ pub struct Settings {
     pub auth_server_address: Option<String>,
     pub auth_server_port: Option<i32>,
     pub mqtt_topics: Vec<String>,
-    pub connect_retry_seconds: i32
+    pub connect_retry_seconds: u64
 }
 
-impl Settings {
-    pub fn from_file(path: &str) -> Settings {
+impl CloudSettings {
+    pub fn from_file(path: &str) -> CloudSettings {
         // set up defaults
-        let mut settings = Settings{
+        let mut settings = CloudSettings{
             enabled: true,
             update_server_address: "".to_string(),
             update_server_port: 883,
@@ -26,7 +26,7 @@ impl Settings {
              connect_retry_seconds: 15
         };
 
-        let lines = Settings::read_lines(path);
+        let lines = CloudSettings::read_lines(path);
         for line in lines {
 
             let s = line
@@ -72,7 +72,7 @@ impl Settings {
                     },
                     "connect_retry_seconds" =>
                     {
-                        settings.connect_retry_seconds = val.parse::<i32>().unwrap();
+                        settings.connect_retry_seconds = val.parse::<u64>().unwrap();
                     },
                     _ => 
                     {
