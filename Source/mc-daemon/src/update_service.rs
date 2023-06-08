@@ -1,10 +1,10 @@
-use std::{thread::{sleep, self}, hash::BuildHasher};
+use std::{thread::{sleep, self}, sync::{Mutex, Arc}};
 use tokio::time;
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UpdateState {
+pub enum UpdateState {
     Dead,
     Disconnected,
     Authenticating,
@@ -16,44 +16,57 @@ enum UpdateState {
     UpdateInProgress
 }
 
-struct UpdateStateMachine; 
+pub struct UpdateStateMachine {
+    settings: CloudSettings, 
+    machine_id: String,
+    state: Arc<Mutex<UpdateState>>
+}
 
 impl UpdateStateMachine {
-    pub async fn start(settings: CloudSettings, machine_id: String) {
-        let mut state = UpdateState::Dead;
-        sleep(time::Duration::from_secs(settings.connect_retry_seconds));
+
+    pub fn new(settings: CloudSettings, machine_id: String) -> UpdateStateMachine {
+        UpdateStateMachine{settings, machine_id, state: Arc::new(Mutex::new( UpdateState::Dead))}
+    }
+
+    pub fn start(&self) {
+        let subscriber = Arc::new(CloudSubscriber::new(self.settings.clone(), self.machine_id.clone(), self.state.clone()));
+        
+        sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
 
         // initialize()
-        let mut last_state = state;
+        let mut last_state = *self.state.lock().unwrap();
 
         loop {
-            if last_state != state {
-                println!("service state: {:?}", state);
-                last_state = state;
+            let mut current_state = *self.state.lock().unwrap();
+
+            if last_state != current_state {
+                println!("service state: {:?}", current_state);
+                last_state = current_state;
             }
 
-            match state {
+            match current_state {
                 UpdateState::Dead => {
-                    state = UpdateState::Disconnected;
+                    *self.state.lock().unwrap() = UpdateState::Disconnected;
                 },
                 UpdateState::Disconnected => {
-                    if settings.use_authentication {
-                        state = UpdateState::Authenticating;
+                    if self.settings.use_authentication {
+                        *self.state.lock().unwrap() = UpdateState::Authenticating;
                     }
                     else {
-                        state = UpdateState::Connecting;
+                        *self.state.lock().unwrap() = UpdateState::Connecting;
                     }
                 }
                 UpdateState::Authenticating => {
                     // TODO
                 }
                 UpdateState::Connecting => {
-                    let subscriber = CloudSubscriber::new(settings.clone(), machine_id.clone());
+                    let s = subscriber.clone();
+
                     thread::spawn(move || {
-                        subscriber.start();
+                        s.start();
                     });
+
                     
-                    state = UpdateState::Connected;
                 },
                 UpdateState::Connected => {
                     // TODO
@@ -92,14 +105,16 @@ impl UpdateService {
             cloud_subscriber: None}
     }
 
-    pub async fn start(&mut self) {
+    pub fn start(&mut self) {
 
         // create copies for the thread closure
         let s = self.settings.clone();
         let id = self.machine_id.clone();
 
-        tokio::spawn(async {
-            UpdateStateMachine::start(s, id).await;
+        let h = thread::spawn(move || {
+            let sm = UpdateStateMachine::new(s, id);
+            sm.start();
         });
+        h.join().unwrap();
     }    
 }

@@ -15,10 +15,9 @@ async fn main() {
     let machine_id = read_to_string("/etc/machine-id").unwrap();
 
     let mut update_service = update_service::UpdateService::new(settings, machine_id.clone());
-    update_service.start().await;
+    update_service.start();
 
     loop {
         sleep(Duration::new(5, 0));
     }
-    println!("exiting daemon");
 }

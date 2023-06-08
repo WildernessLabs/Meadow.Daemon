@@ -1,19 +1,23 @@
 
 extern crate paho_mqtt as mqtt;
 
-use std::{ process, thread, time::Duration};
-use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings};
+use std::{ process, thread, time::Duration, sync::{Arc, Mutex}};
+
+use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings, update_service::{UpdateState}};
 
 const DFLT_CLIENT:&str = "mc_daemon";
 
 pub struct CloudSubscriber {
     settings: CloudSettings,
-    machine_id: String
+    machine_id: String,
+    update_state: Arc<Mutex<UpdateState>>
 }
 
 impl CloudSubscriber {
-    pub fn new(settings: CloudSettings, machine_id: String) -> CloudSubscriber {
-        CloudSubscriber { settings, machine_id }
+    pub fn new(settings: CloudSettings, 
+               machine_id: String, 
+               update_state: Arc<Mutex<UpdateState>>) -> CloudSubscriber {
+        CloudSubscriber { settings, machine_id, update_state }
     }
 
     // Reconnect to the broker when connection is lost.
@@ -97,6 +101,8 @@ impl CloudSubscriber {
             println!("Unable to connect:\n\t{:?}", e);
             process::exit(1);
         }
+
+        *self.update_state.lock().unwrap() = UpdateState::Connected;
 
         // Subscribe topics.
         self.subscribe_topics(&client, &self.settings.mqtt_topics);
