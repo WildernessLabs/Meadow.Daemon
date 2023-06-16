@@ -1,4 +1,6 @@
+use std::default;
 use std::fs::{read_to_string};
+use std::path::{Path};
 
 #[derive(Clone)]
 pub struct CloudSettings {
@@ -13,9 +15,8 @@ pub struct CloudSettings {
 }
 
 impl CloudSettings {
-    pub fn from_file(path: &str) -> CloudSettings {
-        // set up defaults
-        let mut settings = CloudSettings{
+    pub fn default() -> CloudSettings {
+        CloudSettings{
             enabled: true,
             update_server_address: "".to_string(),
             update_server_port: 883,
@@ -24,9 +25,20 @@ impl CloudSettings {
             auth_server_port: None,
              mqtt_topics: vec!["ota".to_string(), "ota/{ID}/updates".to_string()],
              connect_retry_seconds: 15
-        };
+        }
+    }
+
+    pub fn from_file(path: &str) -> CloudSettings {
+        // set up defaults
+        let mut settings = CloudSettings::default();
+
+        if !Path::new(path).exists() {
+            println!("WARNING: Config file '{}' does not exist", path);
+            return settings;
+        }
 
         let lines = CloudSettings::read_lines(path);
+
         for line in lines {
 
             let s = line
@@ -76,7 +88,7 @@ impl CloudSettings {
                     },
                     _ => 
                     {
-                        println!("unknown setting '{}'", s);
+                        println!("WARNING: unknown setting '{}'", s);
                         // unknown setting
                     }
 

@@ -1,7 +1,7 @@
 use std::{thread::{sleep, self}, sync::{Mutex, Arc}};
 use tokio::time;
 
-use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber};
+use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateState {
@@ -19,13 +19,14 @@ pub enum UpdateState {
 pub struct UpdateStateMachine {
     settings: CloudSettings, 
     machine_id: String,
-    state: Arc<Mutex<UpdateState>>
+    state: Arc<Mutex<UpdateState>>,
+    store: UpdateStore
 }
 
 impl UpdateStateMachine {
 
     pub fn new(settings: CloudSettings, machine_id: String) -> UpdateStateMachine {
-        UpdateStateMachine{settings, machine_id, state: Arc::new(Mutex::new( UpdateState::Dead))}
+        UpdateStateMachine{settings: settings.clone(), machine_id: machine_id, state: Arc::new(Mutex::new( UpdateState::Dead)), store: UpdateStore::new(settings.clone())}
     }
 
     pub fn start(&self) {

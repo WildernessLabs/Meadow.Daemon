@@ -111,6 +111,11 @@ impl CloudSubscriber {
         for msg in receiver.iter() {
             if let Some(msg) = msg {
                 let update = UpdateParser::parse_message(msg.payload_str().as_ref());
+
+                // do we already know about this update?
+
+                // pass the update to the store
+                
                 println!("{:?}", update);
             }
             else if !client.is_connected() {

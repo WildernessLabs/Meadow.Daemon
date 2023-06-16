@@ -29,6 +29,23 @@ pub struct UpdateDescriptor {
 }
 
 impl UpdateDescriptor {
+    pub fn new(id: String) -> UpdateDescriptor {
+        UpdateDescriptor { 
+            mpak_id: id, 
+            mpak_download_url: "http://foo.bar".to_string(),
+            target_devices: None, 
+            published_on: "1/1/1980".to_string(), 
+            update_type: 1, 
+            version: "0.999".to_string(), 
+            download_size: 1234, 
+            summary: None, 
+            detail: None, 
+            retrieved: false, 
+            applied: false, 
+            download_hash: "".to_string() 
+        }
+    }
+
     pub fn from_json(json: &str) -> UpdateDescriptor {
         let ud: UpdateDescriptor = serde_json::from_str(json).unwrap();
         ud
