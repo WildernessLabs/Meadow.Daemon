@@ -1,7 +1,7 @@
-use std::{thread::{sleep, self}, sync::{Mutex, Arc}};
+use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc}, rc::Rc};
 use tokio::time;
 
-use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore};
+use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateState {
@@ -29,8 +29,15 @@ impl UpdateStateMachine {
         UpdateStateMachine{settings: settings.clone(), machine_id: machine_id, state: Arc::new(Mutex::new( UpdateState::Dead)), store: UpdateStore::new(settings.clone())}
     }
 
-    pub fn start(&self) {
-        let subscriber = Arc::new(CloudSubscriber::new(self.settings.clone(), self.machine_id.clone(), self.state.clone()));
+    pub fn start(&mut self) {        
+        let (tx, rx) = mpsc::channel();
+
+        let subscriber = Arc::new(
+            CloudSubscriber::new(
+                self.settings.clone(), 
+                self.machine_id.clone(), 
+                self.state.clone()
+                ));
         
         sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
 
@@ -62,15 +69,26 @@ impl UpdateStateMachine {
                 }
                 UpdateState::Connecting => {
                     let s = subscriber.clone();
+                    let snd = tx.clone();
 
                     thread::spawn(move || {
-                        s.start();
+                        s.start(snd);
                     });
 
                     
                 },
                 UpdateState::Connected => {
-                    // TODO
+                    // look for any message from the subscriber
+                    match rx.try_recv() {
+                        Ok(d) => {
+                            println!("{:?}", d);
+
+                            self.store.add(Rc::new(d));
+                        },
+                        Err(e) => {
+                            // no data
+                        }
+                    }
                 },
                 UpdateState::Idle => {
                     // TODO
@@ -113,7 +131,7 @@ impl UpdateService {
         let id = self.machine_id.clone();
 
         let h = thread::spawn(move || {
-            let sm = UpdateStateMachine::new(s, id);
+            let mut sm = UpdateStateMachine::new(s, id);
             sm.start();
         });
         h.join().unwrap();

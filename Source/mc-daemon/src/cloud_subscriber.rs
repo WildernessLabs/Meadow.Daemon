@@ -1,9 +1,9 @@
 
 extern crate paho_mqtt as mqtt;
 
-use std::{ process, thread, time::Duration, sync::{Arc, Mutex}};
+use std::{ process, thread, time::Duration, sync::{Arc, Mutex, mpsc::Sender}};
 
-use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings, update_service::{UpdateState}};
+use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings, update_service::{UpdateState}, update_descriptor::UpdateDescriptor};
 
 const DFLT_CLIENT:&str = "mc_daemon";
 
@@ -16,7 +16,8 @@ pub struct CloudSubscriber {
 impl CloudSubscriber {
     pub fn new(settings: CloudSettings, 
                machine_id: String, 
-               update_state: Arc<Mutex<UpdateState>>) -> CloudSubscriber {
+               update_state: Arc<Mutex<UpdateState>>
+                ) -> CloudSubscriber {
         CloudSubscriber { settings, machine_id, update_state }
     }
 
@@ -63,7 +64,7 @@ impl CloudSubscriber {
         }
     }
 
-    pub fn start(&self) {            
+    pub fn start(&self, sender: Sender<UpdateDescriptor>) {            
         let host = format!("{}:{}", self.settings.update_server_address, self.settings.update_server_port);
 
         // Define the set of options for the create.
@@ -112,11 +113,9 @@ impl CloudSubscriber {
             if let Some(msg) = msg {
                 let update = UpdateParser::parse_message(msg.payload_str().as_ref());
 
-                // do we already know about this update?
-
-                // pass the update to the store
-                
-                println!("{:?}", update);
+                // println!("{:?}", update);
+                // pass the descriptor back to the update service
+                sender.send(update).unwrap();
             }
             else if !client.is_connected() {
                 if self.try_reconnect(&client) {
