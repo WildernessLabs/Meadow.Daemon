@@ -1,4 +1,5 @@
-use std::{rc::Rc, collections::HashMap, cell::RefCell, ops::Deref};
+use std::sync::{Mutex, Arc};
+use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
 use std::fs::{self, OpenOptions};
 use std::io::{Write};
@@ -8,7 +9,7 @@ use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 pub struct UpdateStore {
     _settings: CloudSettings,
     store_directory: PathBuf,
-    updates: HashMap<String, Rc<RefCell<UpdateDescriptor>>>
+    updates: HashMap<String, Arc<Mutex<UpdateDescriptor>>>
 }
 
 impl UpdateStore {
@@ -39,8 +40,8 @@ impl UpdateStore {
         store
     }
 
-    pub fn add(&mut self, descriptor: Rc<UpdateDescriptor>) {
-        let rf = Rc::new( RefCell::new((*descriptor).clone()));
+    pub fn add(&mut self, descriptor: Arc<UpdateDescriptor>) {
+        let rf = Arc::new( Mutex::new((*descriptor).clone()));
         let id = descriptor.deref().mpak_id.clone();
         self.updates.insert(id, rf);
         self.save_or_update(descriptor.deref());
@@ -50,7 +51,7 @@ impl UpdateStore {
         self.updates.len() as i32
     }
 
-    pub fn get_message(&self, id: String) -> Option<&Rc<RefCell<UpdateDescriptor>>> {
+    pub fn get_message(&self, id: String) -> Option<&Arc<Mutex<UpdateDescriptor>>> {
         self.updates.get(&id)
     }
 
@@ -62,7 +63,7 @@ impl UpdateStore {
         let update = self.updates.get(&id);
          match update {
             Some(u) => {
-                let mut d = u.borrow_mut();
+                let mut d = u.lock().unwrap();
                 d.retrieved = true;
 
                 // update file
@@ -76,7 +77,7 @@ impl UpdateStore {
         let update = self.updates.get(&id);
          match update {
             Some(u) => {
-                let mut d = u.borrow_mut();
+                let mut d = u.lock().unwrap();
                 d.applied = true;
 
                 // update file

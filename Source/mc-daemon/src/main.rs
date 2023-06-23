@@ -1,7 +1,5 @@
 use std::{fs::read_to_string, sync::{Arc, Mutex}};
 use mc_daemon::{cloud_settings::CloudSettings, update_service::UpdateService, rest_server, update_store::UpdateStore};
-// use tokio::sync::futures;
-
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,15 +9,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let machine_id = read_to_string("/etc/machine-id").unwrap();
     let update_store: Arc<Mutex<UpdateStore>> = Arc::new(Mutex::new(UpdateStore::new(settings.clone())));
 
-    let mut update_service = UpdateService::new(settings, machine_id.clone(), update_store);
+    let mut update_service = UpdateService::new(settings, machine_id.clone(), update_store.clone());
     
-    update_service.start();
+//    update_service.start();
 
-    /* 
     tokio::spawn(async move {
-        let us = update_service.start();
+        update_service.start();
     }); 
-*/
+
     let mut rest_server = rest_server::RestServer::new();
 
     match rest_server.start().await {
@@ -28,9 +25,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     Ok(())
-    /*
-    loop {
-        sleep(Duration::new(5, 0));
-    }
-    */
 }

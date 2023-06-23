@@ -1,4 +1,4 @@
-use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, rc::Rc};
+use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}};
 use tokio::time;
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor};
@@ -54,7 +54,7 @@ impl UpdateService {
                 self.machine_id.clone()
                 )));
         
-        sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
+//        sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
 
         // initialize()
         let mut last_state = self.state;
@@ -105,7 +105,7 @@ impl UpdateService {
                             self.store
                                 .lock()
                                 .unwrap()
-                                .add(Rc::new(d));
+                                .add(Arc::new(d));
                         },
                         _ => { /* no data */ }
                     }
