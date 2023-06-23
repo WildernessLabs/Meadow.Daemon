@@ -1,9 +1,12 @@
-use std::{rc::Rc, collections::HashMap, cell::RefCell, borrow::Borrow, ops::Deref, path::{Path, PathBuf}, fs::{self, DirEntry, read_dir, OpenOptions}, str::FromStr, fmt::format, io::Write};
+use std::{rc::Rc, collections::HashMap, cell::RefCell, ops::Deref};
+use std::path::{Path, PathBuf};
+use std::fs::{self, OpenOptions};
+use std::io::{Write};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
 pub struct UpdateStore {
-    settings: CloudSettings,
+    _settings: CloudSettings,
     store_directory: PathBuf,
     updates: HashMap<String, Rc<RefCell<UpdateDescriptor>>>
 }
@@ -14,21 +17,23 @@ impl UpdateStore {
 
     pub fn new(settings: CloudSettings) -> UpdateStore {
         let store = UpdateStore {
-            settings,
+            _settings : settings,
             store_directory: PathBuf::from(Self::STORE_ROOT_FOLDER),
             updates: HashMap::new()
         };
         
-        println!("{:?}", store.store_directory);
+        println!("Update data will be stored in '{:?}'", store.store_directory);
 
         if ! store.store_directory.exists() {
             fs::create_dir(&store.store_directory).unwrap();
         }
         else {
             // TODO: load all existing update descriptors
+            /*
             for entry in fs::read_dir(&store.store_directory) {
 
             }
+            */
         }
 
         store

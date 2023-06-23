@@ -1,4 +1,4 @@
-use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc}, rc::Rc};
+use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, rc::Rc};
 use tokio::time;
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor};
@@ -16,36 +16,51 @@ pub enum UpdateState {
     UpdateInProgress
 }
 
-pub struct UpdateStateMachine {
+pub struct UpdateService {
     settings: CloudSettings, 
     machine_id: String,
-    state: Arc<Mutex<UpdateState>>,
-    store: UpdateStore
+    state: UpdateState,
+    store: Arc<Mutex<UpdateStore>>,
+    update_sender: Sender<UpdateDescriptor>,
+    update_receiver: Receiver<UpdateDescriptor>,
+    state_sender: Sender<UpdateState>,
+    state_receiver: Receiver<UpdateState>
 }
 
-impl UpdateStateMachine {
+impl UpdateService {
 
-    pub fn new(settings: CloudSettings, machine_id: String) -> UpdateStateMachine {
-        UpdateStateMachine{settings: settings.clone(), machine_id: machine_id, state: Arc::new(Mutex::new( UpdateState::Dead)), store: UpdateStore::new(settings.clone())}
+    pub fn new(settings: CloudSettings, machine_id: String, store: Arc<Mutex<UpdateStore>>) -> UpdateService {
+        
+        let (update_sender, update_receiver) = mpsc::channel();
+        let (state_sender, state_receiver) = mpsc::channel();
+
+        UpdateService {
+            settings: settings.clone(), 
+            machine_id: machine_id, 
+            state: UpdateState::Dead, 
+            store,
+            update_sender,
+            update_receiver,
+            state_sender,
+            state_receiver
+        }
     }
 
-    pub fn start(&mut self) {        
-        let (tx, rx) = mpsc::channel();
+    pub fn start(&mut self) {
 
-        let subscriber = Arc::new(
+        let subscriber = Arc::new(Mutex::new(
             CloudSubscriber::new(
                 self.settings.clone(), 
-                self.machine_id.clone(), 
-                self.state.clone()
-                ));
+                self.machine_id.clone()
+                )));
         
         sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
 
         // initialize()
-        let mut last_state = *self.state.lock().unwrap();
+        let mut last_state = self.state;
 
         loop {
-            let mut current_state = *self.state.lock().unwrap();
+            let current_state = self.state;
 
             if last_state != current_state {
                 println!("service state: {:?}", current_state);
@@ -54,14 +69,14 @@ impl UpdateStateMachine {
 
             match current_state {
                 UpdateState::Dead => {
-                    *self.state.lock().unwrap() = UpdateState::Disconnected;
+                    self.state = UpdateState::Disconnected;
                 },
                 UpdateState::Disconnected => {
                     if self.settings.use_authentication {
-                        *self.state.lock().unwrap() = UpdateState::Authenticating;
+                        self.state = UpdateState::Authenticating;
                     }
                     else {
-                        *self.state.lock().unwrap() = UpdateState::Connecting;
+                        self.state = UpdateState::Connecting;
                     }
                 }
                 UpdateState::Authenticating => {
@@ -69,25 +84,30 @@ impl UpdateStateMachine {
                 }
                 UpdateState::Connecting => {
                     let s = subscriber.clone();
-                    let snd = tx.clone();
+                    let upd_snd = self.update_sender.clone();
+                    let st_snd = self.state_sender.clone();
 
                     thread::spawn(move || {
-                        s.start(snd);
+                        s
+                            .lock()
+                            .unwrap()
+                            .start(upd_snd, st_snd);
                     });
 
                     
                 },
                 UpdateState::Connected => {
                     // look for any message from the subscriber
-                    match rx.try_recv() {
+                    match self.update_receiver.try_recv() {
                         Ok(d) => {
                             println!("{:?}", d);
 
-                            self.store.add(Rc::new(d));
+                            self.store
+                                .lock()
+                                .unwrap()
+                                .add(Rc::new(d));
                         },
-                        Err(e) => {
-                            // no data
-                        }
+                        _ => { /* no data */ }
                     }
                 },
                 UpdateState::Idle => {
@@ -101,11 +121,21 @@ impl UpdateStateMachine {
                 },
                 _ => { } // nothing to do
             }
+
+            // check to see if the cloud subscriber has a state change for us
+            match self.state_receiver.try_recv() {
+                Ok(new_state) => {
+                    self.state = new_state;
+                },
+                _ => { /* NOP */ }
+            }
+
             sleep(time::Duration::from_secs(1));
         }
     }
 }
 
+/*
 pub struct UpdateService {
     settings: CloudSettings,
     machine_id: String,
@@ -137,3 +167,4 @@ impl UpdateService {
         h.join().unwrap();
     }    
 }
+*/

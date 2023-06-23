@@ -4,3 +4,4 @@ pub mod cloud_settings;
 pub mod cloud_subscriber;
 pub mod update_parser;
 pub mod update_service;
+pub mod rest_server;
