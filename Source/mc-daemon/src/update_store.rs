@@ -40,6 +40,10 @@ impl UpdateStore {
         store
     }
 
+    pub fn get_all_messages(&self) -> Vec<Arc<Mutex<UpdateDescriptor>>> {
+        self.updates.values().cloned().collect::<Vec<Arc<Mutex<UpdateDescriptor>>>>()        
+    }
+
     pub fn add(&mut self, descriptor: Arc<UpdateDescriptor>) {
         let rf = Arc::new( Mutex::new((*descriptor).clone()));
         let id = descriptor.deref().mpak_id.clone();

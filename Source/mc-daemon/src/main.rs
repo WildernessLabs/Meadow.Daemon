@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rest_server = rest_server::RestServer::new();
 
-    match rest_server.start().await {
+    match rest_server.start(update_store).await {
         Err(e) => { println!("Unable to start REST server: {}", e); },
         _ => { println!("daemon exited!"); }
     }
