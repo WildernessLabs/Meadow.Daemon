@@ -21,6 +21,11 @@ struct ServiceInfo {
     status: String
 }
 
+#[derive(Serialize, Deserialize)]
+struct UpdateAction {
+    action: String
+}
+
 pub struct RestServer;
 
 impl RestServer {
@@ -39,13 +44,8 @@ impl RestServer {
                     web::scope("api")
                         .route("/info", web::get().to(Self::get_daemon_info))
                         .route("/updates", web::get().to(Self::get_updates))
+                        .route("/updates/{id}", web::put().to(Self::update_action))
                 )
-                /*
-                .service(
-                    web::scope("/api")
-                        .route("/updates", web::get().to(Self::get_updates2))
-                )
-                */
         })
             .bind(format!("0.0.0.0:{}", PORT))?
             .run()
@@ -63,18 +63,26 @@ impl RestServer {
         }))
     }
 
-    async fn get_updates2() 
-        -> Result<HttpResponse, Error> { //actix_web::Result<impl Responder> {
-        println!("REST GET UPDATE LIST");
+    async fn update_action(
+        data: web::Json<UpdateAction>, id: web::Path<String>) 
+        -> impl Responder {
 
-        // open the store
+        println!("REST PUT UPDATE");
         
-
-        // retrieve update info
-
-        Ok(HttpResponse::Ok().body("hello"))
+        match data.action.as_str() {
+            "download" => {
+                println!("Download MPAK for {}", id);
+            },
+            "apply" => {
+                println!("Apply update {}", id);
+            },
+            _ => {
+                println!("Unknown action request: {}", data.action);
+            }
+        }
+        HttpResponse::Ok().finish()
     }
-
+    
     async fn get_updates(
         store: web::Data<Arc<Mutex<UpdateStore>>>) 
         -> Result<HttpResponse, Error> { //actix_web::Result<impl Responder> {
