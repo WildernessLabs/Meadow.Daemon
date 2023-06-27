@@ -3,6 +3,7 @@ use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
 use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy};
+use zip::{ZipArchive};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
@@ -63,6 +64,50 @@ impl UpdateStore {
         self.updates.clear();
     }
 
+    pub async fn extract_update(&self, id: &String, destination_root: String) -> Result<u64, String> {
+        let update = self.updates.get(id);
+        match update {
+            Some(u) => {
+                let mut d = u.lock().unwrap();
+
+                let file_name = format!("/home/ctacke/{}.mpak", d.mpak_id);
+
+                let zip_file = File::open(file_name).unwrap();
+                let mut archive = ZipArchive::new(zip_file).unwrap();
+            
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).unwrap();
+                    let outpath = Path::new(&destination_root).join(file.name());
+                    if (&*file.name()).ends_with('/') {
+                        std::fs::create_dir_all(&outpath).unwrap();
+                    } 
+                    else {
+                        if let Some(p) = outpath.parent() {
+                            if !p.exists() {
+                                std::fs::create_dir_all(&p).unwrap();
+                            }
+                        }
+                        let mut outfile = File::create(&outpath).unwrap();
+                        std::io::copy(&mut file, &mut outfile).unwrap();
+                    }
+                }
+            
+                // mark as "applied"
+                d.applied = true;
+
+                // update file
+                self.save_or_update(&d);
+
+                // TODO: return something meaningful?
+                Ok(1)        
+            },
+            None => {
+
+                Err(format!("Update {} not known", id))
+            }
+        }
+    }
+
     pub async fn retrieve_update(&self, id: &String) -> Result<u64, String> {
         
         // is this an update we know about?
@@ -118,52 +163,21 @@ impl UpdateStore {
                 Err(format!("Update {} not known", id))
             }
         }
-
-
-
-    }
-
-    pub fn set_retreived(&self, id: String) {
-        let update = self.updates.get(&id);
-         match update {
-            Some(u) => {
-                let mut d = u.lock().unwrap();
-                d.retrieved = true;
-
-                // update file
-                self.save_or_update(d.deref());
-            },
-            None => {}
-         }
-    }
-
-    pub fn set_applied(&self, id: String) {
-        let update = self.updates.get(&id);
-         match update {
-            Some(u) => {
-                let mut d = u.lock().unwrap();
-                d.applied = true;
-
-                // update file
-                self.save_or_update(d.deref());
-            },
-            None => {}
-         }
     }
 
     fn save_or_update(&self, descriptor: &UpdateDescriptor) {
         println!("{:?}", descriptor);
 
-        // todo: make sure subdir exists
+        // make sure subdir exists
         let mut path = Path::new(Self::STORE_ROOT_FOLDER).join(&descriptor.mpak_id);
         if ! path.exists() {
             fs::create_dir(&path).unwrap();
         }
 
-        // todo: serialize
+        // serialize
         let json = serde_json::to_string_pretty(&descriptor).unwrap();
 
-        // todo: erase any existing file
+        // erase any existing file
         path.push(&Self::UPDATE_INFO_FILE_NAME);
 
         let mut file = OpenOptions::new()
@@ -172,7 +186,7 @@ impl UpdateStore {
             .open(path)
             .unwrap();
 
-        // todo: save
+        // save
         file.write_all(json.as_bytes()).unwrap();
 
     }

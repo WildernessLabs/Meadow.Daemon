@@ -88,7 +88,18 @@ impl RestServer {
             },
             "apply" => {
                 println!("Apply update {}", id);
-                HttpResponse::Ok().finish()
+                match store
+                    .lock()
+                    .unwrap()
+                    .extract_update(&id, "/home/ctacke/upd/".to_string())
+                    .await {
+                        Ok(_result) => {
+                            HttpResponse::Ok().finish()
+                        },
+                        Err(msg) => {
+                            HttpResponse::NotFound().body(msg) 
+                        }
+                    }
             },
             _ => {
                 println!("Unknown action request: {}", data.action);
