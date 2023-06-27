@@ -1,8 +1,8 @@
 use std::sync::{Mutex, Arc};
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
-use std::fs::{self, OpenOptions};
-use std::io::{Write};
+use std::fs::{self, OpenOptions, File};
+use std::io::{Write, Cursor, copy};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
@@ -61,6 +61,66 @@ impl UpdateStore {
 
     pub fn clear(&mut self) {
         self.updates.clear();
+    }
+
+    pub async fn retrieve_update(&self, id: &String) -> Result<u64, String> {
+        
+        // is this an update we know about?
+        let update = self.updates.get(id);
+        match update {
+            Some(u) => {
+               let mut d = u.lock().unwrap();
+
+                let mut sanitized_url = (&d.mpak_download_url).to_string();
+                if !sanitized_url.starts_with("http") {
+                    // TODO: support auth/https
+                    sanitized_url.insert_str(0, "http://");
+
+                }
+
+                match reqwest::get(&sanitized_url).await {
+                    Ok(response) => {
+                        // determine where to store the mpak - we will extract on apply
+                        let file_name = format!("/home/ctacke/{}.mpak", d.mpak_id);
+
+                        // download the update
+                        println!("downloading {} to {}", sanitized_url, file_name);
+                        
+                        let mut file = File::create(file_name).unwrap();
+
+                        match response.bytes().await {
+                            Ok(data) => {
+                                let mut content = Cursor::new(data);
+                                let size = copy(&mut content, &mut file).unwrap();
+                
+                                // set the update as retrieved
+                                d.retrieved = true;
+                
+                                // update file
+                                self.save_or_update(d.deref());
+                
+                                // return the size?  file name?  something
+                                Ok(size)
+        
+                            },
+                            Err(e) => {
+                                return Err(e.to_string());
+                            }
+                        }                                
+                    },
+                    Err(e) => {
+                        return Err(e.to_string());
+                    }
+                }
+            },
+            None => {
+
+                Err(format!("Update {} not known", id))
+            }
+        }
+
+
+
     }
 
     pub fn set_retreived(&self, id: String) {

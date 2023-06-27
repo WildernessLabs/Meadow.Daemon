@@ -64,6 +64,7 @@ impl RestServer {
     }
 
     async fn update_action(
+        store: web::Data<Arc<Mutex<UpdateStore>>>,
         data: web::Json<UpdateAction>, id: web::Path<String>) 
         -> impl Responder {
 
@@ -72,15 +73,28 @@ impl RestServer {
         match data.action.as_str() {
             "download" => {
                 println!("Download MPAK for {}", id);
+                match store
+                    .lock()
+                    .unwrap()
+                    .retrieve_update(&id)
+                    .await {
+                        Ok(_result) => {
+                            HttpResponse::Ok().finish()
+                        },
+                        Err(msg) => {
+                            HttpResponse::NotFound().body(msg) 
+                        }
+                    }
             },
             "apply" => {
                 println!("Apply update {}", id);
+                HttpResponse::Ok().finish()
             },
             _ => {
                 println!("Unknown action request: {}", data.action);
+                HttpResponse::NotFound().finish()
             }
         }
-        HttpResponse::Ok().finish()
     }
     
     async fn get_updates(
