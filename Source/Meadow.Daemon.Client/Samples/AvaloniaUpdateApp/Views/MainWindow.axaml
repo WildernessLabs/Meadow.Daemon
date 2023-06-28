@@ -1,0 +1,144 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:AvaloniaUpdateApp.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="AvaloniaUpdateApp.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="Meadow Daemon Client App">
+
+    <Design.DataContext>
+        <!-- This only sets the DataContext for the previewer in an IDE,
+             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
+		</Grid.RowDefinitions>
+		<Grid.ColumnDefinitions>
+			<ColumnDefinition Width="Auto" />
+			<ColumnDefinition Width="*"/>
+		</Grid.ColumnDefinitions>
+		
+		<TextBlock 
+			Grid.Row="0"
+			Grid.Column="0"
+			Text="Service Address:"
+			VerticalAlignment="Center"/>
+		<TextBox 
+			Grid.Row="0"
+			Grid.Column="1"
+			Text="{Binding ServiceAddress}" 
+			VerticalAlignment="Center"/>
+		
+		<TextBlock
+			Grid.Row="1"
+			Grid.Column="0"
+			Text="Service Port:"
+			VerticalAlignment="Center"/>
+		<TextBox
+			Grid.Row="1"
+			Grid.Column="1"
+			Text="{Binding ServicePort}"
+			VerticalAlignment="Center"/>
+
+		<StackPanel 
+				Grid.Row="2"
+				Grid.Column="1"
+			Orientation="Horizontal">
+			<Button
+				Command="{Binding StartCommand}">
+				Start
+			</Button>
+			<Button
+				Command="{Binding RefreshCommand}">
+				Refresh
+			</Button>
+		</StackPanel>
+
+		<TextBlock
+			Grid.Row="3"
+			Grid.Column="0"
+			Text="Device Info:"
+			VerticalAlignment="Center"/>
+		<StackPanel
+			Grid.Row="3"
+			Grid.Column="1"
+		>
+			<StackPanel Orientation="Horizontal">
+				<TextBlock
+					VerticalAlignment="Center"
+					FontWeight="Bold"
+					Text="name:" />
+				<TextBlock
+					VerticalAlignment="Center"
+					Text="{Binding DeviceInfo.Service}" />
+			</StackPanel>
+			<StackPanel Orientation="Horizontal">
+				<TextBlock
+					VerticalAlignment="Center"
+					FontWeight="Bold"
+					Text="version:" />
+				<TextBlock
+					VerticalAlignment="Center"
+					Text="{Binding DeviceInfo.Version}" />
+			</StackPanel>
+		</StackPanel>
+
+		<TextBlock
+			Grid.Row="4"
+			Grid.Column="0"
+			Text="Available Updates:"
+			VerticalAlignment="Center"/>
+		<ListBox
+			Height="500"
+			Grid.Row="5"
+			Grid.ColumnSpan="2"
+			 ItemsSource="{Binding Updates}">
+				<ListBox.ItemTemplate>
+					<DataTemplate>						
+						<Border Background="Gray" CornerRadius="4" Padding="4">
+							<Grid>
+								<Grid.RowDefinitions>
+									<RowDefinition Height="Auto" />
+									<RowDefinition Height="Auto" />
+									<RowDefinition Height="Auto" />
+									<RowDefinition Height="Auto" />
+									<RowDefinition Height="Auto" />
+									<RowDefinition Height="Auto" />
+								</Grid.RowDefinitions>
+								<Grid.ColumnDefinitions>
+									<ColumnDefinition Width="Auto" />
+									<ColumnDefinition Width="Auto"/>
+								</Grid.ColumnDefinitions>
+
+								<TextBlock
+									Grid.Row="0"
+									Grid.Column="0"
+									Text="ID:"/>
+
+								<TextBlock
+									Grid.Row="1"
+									Grid.Column="0"
+									Text="Version:"/>
+								<TextBlock Text="{Binding}"/>
+								<!--
+								<TextBlock Text="{Binding Version}"/>
+								-->
+							</Grid>
+						</Border>
+				</DataTemplate>
+			</ListBox.ItemTemplate>
+		</ListBox>
+	</Grid>
+
+</Window>

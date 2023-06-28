@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33213.308
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Meadow.Daemon.Client", "Library\Meadow.Daemon.Client.csproj", "{A202E174-C639-4746-8739-D45C4BDBFB8B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaloniaUpdateApp", "Samples\AvaloniaUpdateApp\AvaloniaUpdateApp.csproj", "{C592C287-A0D7-4EB3-B1C6-E571E418823B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A202E174-C639-4746-8739-D45C4BDBFB8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A202E174-C639-4746-8739-D45C4BDBFB8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A202E174-C639-4746-8739-D45C4BDBFB8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A202E174-C639-4746-8739-D45C4BDBFB8B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C592C287-A0D7-4EB3-B1C6-E571E418823B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C592C287-A0D7-4EB3-B1C6-E571E418823B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C592C287-A0D7-4EB3-B1C6-E571E418823B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C592C287-A0D7-4EB3-B1C6-E571E418823B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7A44C650-EF57-4717-BED9-89C5713C3F7C}
+	EndGlobalSection
+EndGlobal
