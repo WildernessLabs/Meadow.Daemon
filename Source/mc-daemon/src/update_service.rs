@@ -134,37 +134,3 @@ impl UpdateService {
         }
     }
 }
-
-/*
-pub struct UpdateService {
-    settings: CloudSettings,
-    machine_id: String,
-    stop_service: bool,
-    state: UpdateState,
-    cloud_subscriber: Option<CloudSubscriber>
-}
-
-impl UpdateService {
-    pub fn new(settings: CloudSettings, machine_id: String) -> UpdateService {
-        UpdateService {
-            settings, 
-            machine_id: machine_id, 
-            stop_service: false, 
-            state: UpdateState::Disconnected,
-            cloud_subscriber: None}
-    }
-
-    pub fn start(&mut self) {
-
-        // create copies for the thread closure
-        let s = self.settings.clone();
-        let id = self.machine_id.clone();
-
-        let h = thread::spawn(move || {
-            let mut sm = UpdateStateMachine::new(s, id);
-            sm.start();
-        });
-        h.join().unwrap();
-    }    
-}
-*/

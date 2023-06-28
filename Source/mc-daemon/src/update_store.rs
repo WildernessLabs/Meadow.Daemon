@@ -49,7 +49,10 @@ impl UpdateStore {
                                                 Ok(file) => {
                                                     let reader = BufReader::new(file);
                                                     match serde_json::from_reader(reader) {
-                                                        Ok(descriptor) => store.add(Arc::new(descriptor)),
+                                                        Ok(descriptor) => {
+                                                            // TODO: verify the mpak existence for "retrieved" items?
+                                                            store.add(Arc::new(descriptor))
+                                                        },
                                                         Err(err) => {
                                                             println!("Cannot deserialize info for {:?}: {:?}", e.file_name(), err);
                                                         }        
@@ -107,7 +110,7 @@ impl UpdateStore {
             Some(u) => {
                 let mut d = u.lock().unwrap();
 
-                let file_name = format!("/home/ctacke/{}.mpak", d.mpak_id);
+                let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
 
                 let zip_file = File::open(file_name).unwrap();
                 let mut archive = ZipArchive::new(zip_file).unwrap();
@@ -163,7 +166,7 @@ impl UpdateStore {
                 match reqwest::get(&sanitized_url).await {
                     Ok(response) => {
                         // determine where to store the mpak - we will extract on apply
-                        let file_name = format!("/home/ctacke/{}.mpak", d.mpak_id);
+                        let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
 
                         // download the update
                         println!("downloading {} to {}", sanitized_url, file_name);
@@ -220,6 +223,7 @@ impl UpdateStore {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(path)
             .unwrap();
 

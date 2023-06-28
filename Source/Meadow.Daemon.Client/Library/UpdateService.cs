@@ -6,6 +6,8 @@ public partial class UpdateService : IDisposable
 {
     public event EventHandler Connected = delegate { };
     public event EventHandler Disconnected = delegate { };
+    public event EventHandler<UpdateDescriptor> UpdateAdded = delegate { };
+    public event EventHandler<UpdateDescriptor> UpdateChanged = delegate { };
 
     private Task? _stateMonitor;
     private CancellationTokenSource? _cancellationToken;
@@ -77,6 +79,64 @@ public partial class UpdateService : IDisposable
         _stateMonitor?.Wait();
     }
 
+    public async Task BeginRetrieveUpdate(string updateID)
+    {
+        try
+        {
+            var existing = Updates[updateID];
+
+            var payload = new JsonContent(new UpdateAction
+            {
+                Action = UpdateActions.Download
+            });
+
+            var response = await _httpClient.PutAsync(
+                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateID))}",
+                payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // TODO: throw an appropriate exception
+            }
+        }
+        catch (Exception ex)
+        {
+            // TODO: catch only timeout here
+
+            // disconnect
+            IsConnected = false;
+        }
+    }
+
+    public async Task BeginApplyUpdate(string updateID)
+    {
+        try
+        {
+            var existing = Updates[updateID];
+
+            var payload = new JsonContent(new UpdateAction
+            {
+                Action = UpdateActions.Apply
+            });
+
+            var response = await _httpClient.PutAsync(
+                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateID))}",
+                payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // TODO: throw an appropriate exception
+            }
+        }
+        catch (Exception ex)
+        {
+            // TODO: catch only timeout here
+
+            // disconnect
+            IsConnected = false;
+        }
+    }
+
     private async Task<DeviceInfo?> GetDeviceInfo()
     {
         try
@@ -115,11 +175,40 @@ public partial class UpdateService : IDisposable
 
                 if (updates != null)
                 {
+                    var previousIDs = Updates.Select(u => u.ID);
+                    var currentIDs = updates.Select(u => u.ID);
+
+                    var added = currentIDs.Where(u => !previousIDs.Contains(u));
+                    var removed = previousIDs.Where(u => !currentIDs.Contains(u));
+
+                    // TODO: handle removal
+
                     foreach (var update in updates)
                     {
-                        // TODO: support removal/update
-                        // TODO: raise event
-                        Updates.Add(update);
+                        if (added.Contains(update.ID))
+                        {
+                            Updates.Add(update);
+                            UpdateAdded?.Invoke(this, update);
+                        }
+                        else
+                        {
+                            var changed = false;
+                            // check for changes - only fields that might differ are retrieved and applied
+                            if (Updates[update.ID].Retrieved != update.Retrieved)
+                            {
+                                Updates[update.ID].Retrieved = update.Retrieved;
+                                changed = true;
+                            }
+                            if (Updates[update.ID].Applied != update.Applied)
+                            {
+                                Updates[update.ID].Applied = update.Applied;
+                                changed = true;
+                            }
+                            if (changed)
+                            {
+                                UpdateChanged?.Invoke(this, update);
+                            }
+                        }
                     }
                 }
                 IsConnected = true;
@@ -140,18 +229,6 @@ public partial class UpdateService : IDisposable
 
             await GetDeviceInfo();
             await RefreshUpdateList();
-
-            /*
-            if (IsConnected)
-            { // if we're connected, just get the service info
-                await GetDeviceInfo();
-            }
-            else
-            { // otherwise get the device info *and* refresh all of our update info
-                await GetDeviceInfo();
-                await RefreshUpdateList();
-            }
-            */
 
             await Task.Delay(ServiceCheckPeriod);
         }
