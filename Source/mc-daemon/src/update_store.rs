@@ -1,8 +1,9 @@
+use std::ffi::OsStr;
 use std::sync::{Mutex, Arc};
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
 use std::fs::{self, OpenOptions, File};
-use std::io::{Write, Cursor, copy};
+use std::io::{Write, Cursor, copy, BufReader};
 use zip::{ZipArchive};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
@@ -18,7 +19,7 @@ impl UpdateStore {
     const UPDATE_INFO_FILE_NAME: &str = "info.json";
 
     pub fn new(settings: CloudSettings) -> UpdateStore {
-        let store = UpdateStore {
+        let mut store = UpdateStore {
             _settings : settings,
             store_directory: PathBuf::from(Self::STORE_ROOT_FOLDER),
             updates: HashMap::new()
@@ -31,11 +32,47 @@ impl UpdateStore {
         }
         else {
             // TODO: load all existing update descriptors
-            /*
-            for entry in fs::read_dir(&store.store_directory) {
+            for entry in fs::read_dir(&store.store_directory).unwrap() {
+                match entry {
+                    Ok(e) => {
+                        if e.path().is_dir() {
+                            // it's a likely update folder, but look for (and parse) an info file to be sure
+                            for entry in fs::read_dir(e.path()).unwrap() {
+                                match entry {
+                                    Ok(f) => {
+                                        let fp = f.path();
+                                        let file_name = fp.file_name().unwrap_or(OsStr::new(""));
+                                        if fp.is_file() && file_name == Self::UPDATE_INFO_FILE_NAME {
+                                            println!("Update found: {:?}", e.file_name());
 
+                                            match File::open(fp) {
+                                                Ok(file) => {
+                                                    let reader = BufReader::new(file);
+                                                    match serde_json::from_reader(reader) {
+                                                        Ok(descriptor) => store.add(Arc::new(descriptor)),
+                                                        Err(err) => {
+                                                            println!("Cannot deserialize info for {:?}: {:?}", e.file_name(), err);
+                                                        }        
+                                                    }
+                                                },
+                                                Err(err) => {
+                                                    println!("Cannot open info file for {:?}: {:?}", e.file_name(), err);
+                                                }
+                                            }
+                                        }
+                                    },
+                                    Err(_e) => {
+                                        // TODO: ???
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Err(_e) => {
+                        // TODO: ???
+                    }
+                }
             }
-            */
         }
 
         store
