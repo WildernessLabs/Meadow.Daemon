@@ -108,14 +108,29 @@ impl UpdateStore {
 
     pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32) -> Result<u64, String> {
         let p = app_path.clone();
+        let update = self.updates.get(id).unwrap().clone();
+
+        // extract the update to a temp location
+        let d = update.lock().unwrap();
+        let package_path = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
+        let update_temp_path = format!("{}/{}/tmp", Self::STORE_ROOT_FOLDER, d.mpak_id);
+        self.extract_package_to_location(package_path, &update_temp_path).unwrap();
+
+        // make sure it's a valid app update (i.e. has an `app` folder)
+        let update_source_folder = Path::new(&update_temp_path).join("app");
+        if !update_source_folder.is_dir() {
+            return Err("Package does not contain a valid Application update".to_string());
+        }
+
+        // spawn a thread to wait for app shutdown
 
         thread::spawn(move || {
-            let folder = p.parent().unwrap().to_str().unwrap();
+            let application_folder = p.parent().unwrap().to_str().unwrap();
             let app = p.file_name().unwrap().to_str().unwrap();
             let proc_folder = format!("/proc/{}", pid);
             let proc_path = Path::new(&proc_folder);
 
-            println!("Caller is '{}' (PID {}) running from '{}'", app, pid, folder);
+            println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
 
             loop {
                 // there's probably a better way to do this, but I can't find it
@@ -132,11 +147,22 @@ impl UpdateStore {
                     _ => {
                         println!("'{}' exited", &app);
 
-                        // apply the update to the folder
-                        //self.extract_app_update(id, folder.to_string());
+                        // todo: copy existing app binaries to a rollback folder
 
-                        // todo: re-launch app
-                        break;
+                        // move the update to the app folder
+                        let opts = fs_extra::dir::CopyOptions::new()
+                        .overwrite(true)
+                        .content_only(true);
+
+                        fs_extra::dir::copy(
+                            update_source_folder,
+                            application_folder,
+                            &opts
+                            ).unwrap();
+
+                        // todo: update the descriptor to "applied"
+
+                        // todo: restart the app
                     }
                 }
             }
@@ -145,7 +171,65 @@ impl UpdateStore {
         Ok(1)
     }
 
-    async fn extract_app_update(&self, id: &String, destination_root: String) -> Result<u64, String> {
+    fn _extract_update_to_location(update: Arc<Mutex<UpdateDescriptor>>, file_name: String, destination_root: &String) -> Result<u64, String> {
+            let mut d = update.lock().unwrap();
+
+            let zip_file = File::open(file_name).unwrap();
+            let mut archive = ZipArchive::new(zip_file).unwrap();
+        
+            for i in 0..archive.len() {
+                let mut file = archive.by_index(i).unwrap();
+                let outpath = Path::new(&destination_root).join(file.name());
+                if (&*file.name()).ends_with('/') {
+                    std::fs::create_dir_all(&outpath).unwrap();
+                } 
+                else {
+                    if let Some(p) = outpath.parent() {
+                        if !p.exists() {
+                            std::fs::create_dir_all(&p).unwrap();
+                        }
+                    }
+                    let mut outfile = File::create(&outpath).unwrap();
+                    std::io::copy(&mut file, &mut outfile).unwrap();
+                }
+            };
+
+            Ok(1)
+
+/*            
+                // mark as "applied"
+                d.applied = true;
+
+                // update file
+                self.save_or_update(&d);
+*/
+    }
+
+    fn extract_package_to_location(&self, package_path: String, destination_root: &String) -> Result<u64, String> {
+        let zip_file = File::open(package_path).unwrap();
+        let mut archive = ZipArchive::new(zip_file).unwrap();
+    
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).unwrap();
+            let outpath = Path::new(&destination_root).join(file.name());
+            if (&*file.name()).ends_with('/') {
+                std::fs::create_dir_all(&outpath).unwrap();
+            } 
+            else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        std::fs::create_dir_all(&p).unwrap();
+                    }
+                }
+                let mut outfile = File::create(&outpath).unwrap();
+                std::io::copy(&mut file, &mut outfile).unwrap();
+            }
+        }
+
+        Ok(1)
+    }
+
+    async fn _extract_app_update(&self, id: &String, destination_root: String) -> Result<u64, String> {
         let update = self.updates.get(id);
         match update {
             Some(u) => {
