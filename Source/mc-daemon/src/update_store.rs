@@ -1,5 +1,7 @@
 use std::ffi::OsStr;
 use std::sync::{Mutex, Arc};
+use std::thread::{self, sleep};
+use std::time::Duration;
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
 use std::fs::{self, OpenOptions, File};
@@ -104,7 +106,46 @@ impl UpdateStore {
         self.updates.clear();
     }
 
-    pub async fn extract_update(&self, id: &String, destination_root: String) -> Result<u64, String> {
+    pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32) -> Result<u64, String> {
+        let p = app_path.clone();
+
+        thread::spawn(move || {
+            let folder = p.parent().unwrap().to_str().unwrap();
+            let app = p.file_name().unwrap().to_str().unwrap();
+            let proc_folder = format!("/proc/{}", pid);
+            let proc_path = Path::new(&proc_folder);
+
+            println!("Caller is '{}' (PID {}) running from '{}'", app, pid, folder);
+
+            loop {
+                // there's probably a better way to do this, but I can't find it
+                // wait::waitpid only works for child processes
+
+                match proc_path.is_dir() {
+                    true => {
+                        println!("'{}' is still alive", app);
+
+                        // todo: put in a timeout escape hatch here
+
+                        sleep(Duration::from_millis(1000));
+                    },
+                    _ => {
+                        println!("'{}' exited", &app);
+
+                        // apply the update to the folder
+                        //self.extract_app_update(id, folder.to_string());
+
+                        // todo: re-launch app
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(1)
+    }
+
+    async fn extract_app_update(&self, id: &String, destination_root: String) -> Result<u64, String> {
         let update = self.updates.get(id);
         match update {
             Some(u) => {

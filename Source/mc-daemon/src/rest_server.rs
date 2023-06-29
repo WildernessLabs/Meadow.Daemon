@@ -1,4 +1,4 @@
-use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}};
+use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}};
 use actix_web::{App, Error, HttpResponse, HttpServer, web, Responder};
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,8 @@ struct ServiceInfo {
 
 #[derive(Serialize, Deserialize)]
 struct UpdateAction {
-    action: String
+    action: String,
+    pid: i32
 }
 
 pub struct RestServer;
@@ -88,18 +89,54 @@ impl RestServer {
             },
             "apply" => {
                 println!("Apply update {}", id);
-                match store
-                    .lock()
-                    .unwrap()
-                    .extract_update(&id, "/home/ctacke/upd/".to_string())
-                    .await {
-                        Ok(_result) => {
-                            HttpResponse::Ok().finish()
+                let pid = data.pid;
+
+                if pid != 0 {
+                    // a PID was passed in from the caller, find out who they are, where they are and their state
+                    match fs::read_link(format!("/proc/{}/exe", pid)) {
+                        Ok(link) => {
+                            // note: this will launch a thread to wait and apply
+                            match store
+                                .lock()
+                                .unwrap()
+                                .apply_update(&id, &link, pid)
+                                .await {
+                                    Ok(_result) => {
+                                        return HttpResponse::Ok().finish();
+                                    },
+                                    Err(msg) => {
+                                        return HttpResponse::NotFound().body(msg);
+                                    }
+                                }
                         },
-                        Err(msg) => {
-                            HttpResponse::NotFound().body(msg) 
+                        Err(_) => {
+                            let msg = format!("Caller sent in an invalid PID {}", data.pid);
+                            println!("{}", msg);
+                            return HttpResponse::NotFound().body(msg) ;
                         }
+
                     }
+                }
+                else {
+                    // TODO: should we support non-pid apply calls?
+                    let msg = format!("Caller did not provide a PID");
+                    println!("{}", msg);
+                    return HttpResponse::BadRequest().body(msg) ;
+                    /*
+                    match store
+                        .lock()
+                        .unwrap()
+                        .extract_update(&id, "/home/ctacke/upd/".to_string())
+                        .await {
+                            Ok(_result) => {
+                                HttpResponse::Ok().finish()
+                            },
+                            Err(msg) => {
+                                HttpResponse::NotFound().body(msg) 
+                            }
+                        }
+                    */
+                }
             },
             _ => {
                 println!("Unknown action request: {}", data.action);
