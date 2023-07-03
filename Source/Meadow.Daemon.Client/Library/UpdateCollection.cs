@@ -1,8 +1,9 @@
-﻿using System.Collections;
+﻿using Meadow.Update;
+using System.Collections;
 
 namespace Meadow.Daemon;
 
-public class UpdateCollection : IEnumerable<UpdateDescriptor>
+public class UpdateCollection : IEnumerable<UpdateInfo>
 {
     private List<UpdateDescriptor> _list;
 
@@ -13,8 +14,8 @@ public class UpdateCollection : IEnumerable<UpdateDescriptor>
 
     public int Count => _list.Count;
 
-    public UpdateDescriptor this[int index] => _list[index];
-    public UpdateDescriptor this[string id] => _list.FirstOrDefault(d => string.Compare(d.ID, id, true) == 0);
+    public UpdateInfo this[int index] => _list[index];
+    public UpdateInfo this[string id] => _list.FirstOrDefault(d => string.Compare(d.ID, id, true) == 0);
 
     internal void Add(UpdateDescriptor updateDescriptor)
     {
@@ -28,7 +29,7 @@ public class UpdateCollection : IEnumerable<UpdateDescriptor>
         }
     }
 
-    public IEnumerator<UpdateDescriptor> GetEnumerator()
+    public IEnumerator<UpdateInfo> GetEnumerator()
     {
         return _list.GetEnumerator();
     }

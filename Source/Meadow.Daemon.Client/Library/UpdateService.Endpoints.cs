@@ -23,6 +23,8 @@ public partial class UpdateService
     {
         [JsonPropertyName("action")]
         public string Action { get; set; }
+        [JsonPropertyName("pid")]
+        public int Pid { get; set; }
     }
 
     internal class JsonContent : StringContent

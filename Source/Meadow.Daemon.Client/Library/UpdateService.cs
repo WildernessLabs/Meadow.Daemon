@@ -1,20 +1,30 @@
-﻿using System.Text.Json;
+﻿using Meadow.Update;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace Meadow.Daemon;
 
-public partial class UpdateService : IDisposable
+public partial class UpdateService : IUpdateService, IDisposable
 {
+    public event UpdateEventHandler OnUpdateAvailable = delegate { };
+    public event UpdateEventHandler OnUpdateRetrieved = delegate { };
+    public event UpdateEventHandler OnUpdateSuccess = delegate { };
+    public event UpdateEventHandler OnUpdateFailure = delegate { };
+
+    public bool CanUpdate => State == UpdateState.Idle;
+    public UpdateState State { get; private set; }
+
+    public void ClearUpdates() { throw new NotImplementedException(); }
+
     public event EventHandler Connected = delegate { };
     public event EventHandler Disconnected = delegate { };
-    public event EventHandler<UpdateDescriptor> UpdateAdded = delegate { };
-    public event EventHandler<UpdateDescriptor> UpdateChanged = delegate { };
+    public event EventHandler<UpdateInfo> UpdateChanged = delegate { };
 
     private Task? _stateMonitor;
     private CancellationTokenSource? _cancellationToken;
     private bool _isDisposed;
     private HttpClient _httpClient;
     private JsonSerializerOptions _serializerOptions;
-    private bool _isConnected;
 
     protected virtual TimeSpan ServiceCheckPeriod { get; } = TimeSpan.FromSeconds(5);
     protected virtual string ApiRoot { get; } = "/api";
@@ -24,6 +34,8 @@ public partial class UpdateService : IDisposable
 
     public UpdateService(string serviceAddress = "127.0.0.1", int servicePort = 5000)
     {
+        State = UpdateState.Disconnected;
+
         Updates = new UpdateCollection();
 
         _serializerOptions = new JsonSerializerOptions
@@ -45,24 +57,6 @@ public partial class UpdateService : IDisposable
         _httpClient.BaseAddress = new Uri(serviceAddress);
     }
 
-    public bool IsConnected
-    {
-        get => _isConnected;
-        private set
-        {
-            if (value == IsConnected) return;
-            _isConnected = value;
-            if (IsConnected)
-            {
-                Connected?.Invoke(this, EventArgs.Empty);
-            }
-            else
-            {
-                Disconnected?.Invoke(this, EventArgs.Empty);
-            }
-        }
-    }
-
     public void Start()
     {
         if (_stateMonitor == null)
@@ -79,11 +73,11 @@ public partial class UpdateService : IDisposable
         _stateMonitor?.Wait();
     }
 
-    public async Task BeginRetrieveUpdate(string updateID)
+    public async void RetrieveUpdate(UpdateInfo updateInfo)
     {
         try
         {
-            var existing = Updates[updateID];
+            var existing = Updates[updateInfo.ID];
 
             var payload = new JsonContent(new UpdateAction
             {
@@ -91,7 +85,7 @@ public partial class UpdateService : IDisposable
             });
 
             var response = await _httpClient.PutAsync(
-                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateID))}",
+                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateInfo.ID))}",
                 payload);
 
             if (!response.IsSuccessStatusCode)
@@ -104,23 +98,24 @@ public partial class UpdateService : IDisposable
             // TODO: catch only timeout here
 
             // disconnect
-            IsConnected = false;
+            State = UpdateState.Disconnected;
         }
     }
 
-    public async Task BeginApplyUpdate(string updateID)
+    public async void ApplyUpdate(UpdateInfo updateInfo)
     {
         try
         {
-            var existing = Updates[updateID];
+            var existing = Updates[updateInfo.ID];
 
             var payload = new JsonContent(new UpdateAction
             {
-                Action = UpdateActions.Apply
+                Action = UpdateActions.Apply,
+                Pid = Process.GetCurrentProcess().Id
             });
 
             var response = await _httpClient.PutAsync(
-                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateID))}",
+                $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateInfo.ID))}",
                 payload);
 
             if (!response.IsSuccessStatusCode)
@@ -133,7 +128,7 @@ public partial class UpdateService : IDisposable
             // TODO: catch only timeout here
 
             // disconnect
-            IsConnected = false;
+            State = UpdateState.Disconnected;
         }
     }
 
@@ -149,14 +144,17 @@ public partial class UpdateService : IDisposable
                     _serializerOptions);
 
                 DeviceInfo = info;
-                IsConnected = true;
+                // TODO: parse out state
+                this.State = UpdateState.Connected;
                 return info;
             }
         }
         catch (Exception ex)
         {
+            this.State = UpdateState.Disconnected;
+
             // disconnect
-            IsConnected = false;
+            State = UpdateState.Disconnected;
         }
 
         return null;
@@ -188,7 +186,7 @@ public partial class UpdateService : IDisposable
                         if (added.Contains(update.ID))
                         {
                             Updates.Add(update);
-                            UpdateAdded?.Invoke(this, update);
+                            OnUpdateAvailable?.Invoke(this, update);
                         }
                         else
                         {
@@ -211,13 +209,12 @@ public partial class UpdateService : IDisposable
                         }
                     }
                 }
-                IsConnected = true;
             }
         }
         catch (Exception ex)
         {
             // disconnect
-            IsConnected = false;
+            State = UpdateState.Disconnected;
         }
     }
 

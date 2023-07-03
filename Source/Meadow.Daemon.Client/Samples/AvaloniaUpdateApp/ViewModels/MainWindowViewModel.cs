@@ -1,4 +1,5 @@
 ﻿using Meadow.Daemon;
+using Meadow.Update;
 using ReactiveUI;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -12,12 +13,12 @@ namespace AvaloniaUpdateApp.ViewModels
         private string _serviceAddress;
         private int _servicePort;
 
-        private ObservableCollection<UpdateDescriptor> _updates = new ObservableCollection<UpdateDescriptor>();
+        private ObservableCollection<UpdateInfo> _updates = new ObservableCollection<UpdateInfo>();
 
         public ReactiveCommand<Unit, Unit> StartCommand { get; set; }
         public ReactiveCommand<Unit, Unit> RefreshCommand { get; set; }
-        public ReactiveCommand<UpdateDescriptor, Unit> RetrieveCommand { get; set; }
-        public ReactiveCommand<UpdateDescriptor, Unit> ApplyCommand { get; set; }
+        public ReactiveCommand<UpdateInfo, Unit> RetrieveCommand { get; set; }
+        public ReactiveCommand<UpdateInfo, Unit> ApplyCommand { get; set; }
 
         public MainWindowViewModel()
         {
@@ -27,8 +28,8 @@ namespace AvaloniaUpdateApp.ViewModels
 
             StartCommand = ReactiveCommand.Create(StartService);
             RefreshCommand = ReactiveCommand.Create(Refresh);
-            RetrieveCommand = ReactiveCommand.Create<UpdateDescriptor>(RetrieveUpdate);
-            ApplyCommand = ReactiveCommand.Create<UpdateDescriptor>(ApplyUpdate);
+            RetrieveCommand = ReactiveCommand.Create<UpdateInfo>(RetrieveUpdate);
+            ApplyCommand = ReactiveCommand.Create<UpdateInfo>(ApplyUpdate);
         }
 
         public DeviceInfo? DeviceInfo
@@ -40,7 +41,7 @@ namespace AvaloniaUpdateApp.ViewModels
             }
         }
 
-        public IEnumerable<UpdateDescriptor>? Updates
+        public IEnumerable<UpdateInfo>? Updates
         {
             get => _updates;
         }
@@ -63,17 +64,17 @@ namespace AvaloniaUpdateApp.ViewModels
 
                 _service = new UpdateService(ServiceAddress, ServicePort);
                 _service.Connected += OnServiceConnected;
-                _service.UpdateAdded += OnUpdateAdded;
+                _service.OnUpdateAvailable += OnUpdateAdded;
                 _service.UpdateChanged += OnUpdateChanged;
             }
         }
 
-        private void OnUpdateChanged(object? sender, UpdateDescriptor e)
+        private void OnUpdateChanged(object? sender, UpdateInfo e)
         {
             this.RaisePropertyChanged(nameof(Updates));
         }
 
-        private void OnUpdateAdded(object? sender, UpdateDescriptor e)
+        private void OnUpdateAdded(object? sender, UpdateInfo e)
         {
             _updates.Add(e);
             this.RaisePropertyChanged(nameof(Updates));
@@ -95,14 +96,14 @@ namespace AvaloniaUpdateApp.ViewModels
             _service?.Start();
         }
 
-        private void RetrieveUpdate(UpdateDescriptor update)
+        private void RetrieveUpdate(UpdateInfo update)
         {
-            _service?.BeginRetrieveUpdate(update.ID);
+            _service?.RetrieveUpdate(update);
         }
 
-        private void ApplyUpdate(UpdateDescriptor update)
+        private void ApplyUpdate(UpdateInfo update)
         {
-            _service?.BeginApplyUpdate(update.ID);
+            _service?.ApplyUpdate(update);
         }
     }
 }

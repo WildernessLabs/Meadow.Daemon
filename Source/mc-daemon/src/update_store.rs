@@ -155,7 +155,7 @@ impl UpdateStore {
                         .content_only(true);
 
                         fs_extra::dir::copy(
-                            update_source_folder,
+                            &update_source_folder,
                             application_folder,
                             &opts
                             ).unwrap();
