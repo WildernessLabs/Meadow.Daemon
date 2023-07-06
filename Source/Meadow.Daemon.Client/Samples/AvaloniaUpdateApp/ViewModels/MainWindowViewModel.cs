@@ -12,7 +12,7 @@ namespace AvaloniaUpdateApp.ViewModels
         private UpdateService? _service;
         private string _serviceAddress;
         private int _servicePort;
-
+        private UpdateState _serviceState;
         private ObservableCollection<UpdateInfo> _updates = new ObservableCollection<UpdateInfo>();
 
         public ReactiveCommand<Unit, Unit> StartCommand { get; set; }
@@ -25,6 +25,8 @@ namespace AvaloniaUpdateApp.ViewModels
             // set the defaults
             ServicePort = 5000;
             ServiceAddress = "172.26.8.20";
+
+            ServiceState = UpdateState.Disconnected;
 
             StartCommand = ReactiveCommand.Create(StartService);
             RefreshCommand = ReactiveCommand.Create(Refresh);
@@ -46,6 +48,12 @@ namespace AvaloniaUpdateApp.ViewModels
             get => _updates;
         }
 
+        public UpdateState ServiceState
+        {
+            get => _serviceState;
+            set => this.RaiseAndSetIfChanged(ref _serviceState, value);
+        }
+
         public int ServicePort
         {
             get => _servicePort;
@@ -63,10 +71,16 @@ namespace AvaloniaUpdateApp.ViewModels
                 _service?.Dispose();
 
                 _service = new UpdateService(ServiceAddress, ServicePort);
-                _service.Connected += OnServiceConnected;
-                _service.OnUpdateAvailable += OnUpdateAdded;
+                _service.OnUpdateAvailable += OnUpdateAvailable;
                 _service.UpdateChanged += OnUpdateChanged;
+
+                _service.StateChanged += OnServiceStateChanged;
             }
+        }
+
+        private void OnServiceStateChanged(object? sender, UpdateState e)
+        {
+            ServiceState = e;
         }
 
         private void OnUpdateChanged(object? sender, UpdateInfo e)
@@ -74,7 +88,7 @@ namespace AvaloniaUpdateApp.ViewModels
             this.RaisePropertyChanged(nameof(Updates));
         }
 
-        private void OnUpdateAdded(object? sender, UpdateInfo e)
+        private void OnUpdateAvailable(object? sender, UpdateInfo e)
         {
             _updates.Add(e);
             this.RaisePropertyChanged(nameof(Updates));

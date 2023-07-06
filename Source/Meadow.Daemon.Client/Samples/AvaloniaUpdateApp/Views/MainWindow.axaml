@@ -23,6 +23,7 @@
 			<RowDefinition Height="Auto" />
 			<RowDefinition Height="Auto" />
 			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
 		</Grid.RowDefinitions>
 		<Grid.ColumnDefinitions>
 			<ColumnDefinition Width="Auto" />
@@ -94,13 +95,22 @@
 			</StackPanel>
 		</StackPanel>
 
-		<TextBlock
+		<Label
 			Grid.Row="4"
+			Grid.Column="0"
+			 Content="State:" />
+		<Label
+			Grid.Row="4"
+			Grid.Column="1"
+			 Content="{Binding ServiceState}" />
+
+		<TextBlock
+			Grid.Row="5"
 			Grid.Column="0"
 			Text="Available Updates:"
 			VerticalAlignment="Center"/>
 		<ListBox
-			Grid.Row="5"
+			Grid.Row="6"
 			Grid.ColumnSpan="2"			 
 			ItemsSource="{Binding Updates}">
 			<ListBox.ItemTemplate>

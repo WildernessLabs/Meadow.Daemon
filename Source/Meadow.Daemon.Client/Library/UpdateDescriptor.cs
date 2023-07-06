@@ -7,5 +7,9 @@ namespace Meadow.Daemon;
 internal record UpdateDescriptor : UpdateInfo, INotifyPropertyChanged
 {
     [JsonPropertyName("MpakID")]
-    public new string ID { get; set; }
+    public new string ID
+    {
+        get => base.ID;
+        set => base.ID = value;
+    }
 }

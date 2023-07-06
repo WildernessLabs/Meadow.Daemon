@@ -12,12 +12,10 @@ public partial class UpdateService : IUpdateService, IDisposable
     public event UpdateEventHandler OnUpdateFailure = delegate { };
 
     public bool CanUpdate => State == UpdateState.Idle;
-    public UpdateState State { get; private set; }
 
     public void ClearUpdates() { throw new NotImplementedException(); }
 
-    public event EventHandler Connected = delegate { };
-    public event EventHandler Disconnected = delegate { };
+    public event EventHandler<UpdateState> StateChanged = delegate { };
     public event EventHandler<UpdateInfo> UpdateChanged = delegate { };
 
     private Task? _stateMonitor;
@@ -25,6 +23,7 @@ public partial class UpdateService : IUpdateService, IDisposable
     private bool _isDisposed;
     private HttpClient _httpClient;
     private JsonSerializerOptions _serializerOptions;
+    private UpdateState _state;
 
     protected virtual TimeSpan ServiceCheckPeriod { get; } = TimeSpan.FromSeconds(5);
     protected virtual string ApiRoot { get; } = "/api";
@@ -55,6 +54,17 @@ public partial class UpdateService : IUpdateService, IDisposable
         serviceAddress = $"{serviceAddress}:{servicePort}";
 
         _httpClient.BaseAddress = new Uri(serviceAddress);
+    }
+
+    public UpdateState State
+    {
+        get => _state;
+        private set
+        {
+            if (value == State) return;
+            _state = value;
+            StateChanged?.Invoke(this, State);
+        }
     }
 
     public void Start()
@@ -173,11 +183,11 @@ public partial class UpdateService : IUpdateService, IDisposable
 
                 if (updates != null)
                 {
-                    var previousIDs = Updates.Select(u => u.ID);
-                    var currentIDs = updates.Select(u => u.ID);
+                    var previousIDs = Updates.Select(u => u.ID).ToArray();
+                    var currentIDs = updates.Select(u => u.ID).ToArray();
 
-                    var added = currentIDs.Where(u => !previousIDs.Contains(u));
-                    var removed = previousIDs.Where(u => !currentIDs.Contains(u));
+                    var added = currentIDs.Where(u => !previousIDs.Contains(u)).ToArray();
+                    var removed = previousIDs.Where(u => !currentIDs.Contains(u)).ToArray();
 
                     // TODO: handle removal
 
