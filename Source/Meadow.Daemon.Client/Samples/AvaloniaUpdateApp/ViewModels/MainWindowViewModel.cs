@@ -1,7 +1,6 @@
 ﻿using Meadow.Daemon;
 using Meadow.Update;
 using ReactiveUI;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Reactive;
 
@@ -43,7 +42,7 @@ namespace AvaloniaUpdateApp.ViewModels
             }
         }
 
-        public IEnumerable<UpdateInfo>? Updates
+        public ObservableCollection<UpdateInfo> Updates
         {
             get => _updates;
         }

@@ -6,14 +6,13 @@ namespace Meadow.Daemon;
 
 public partial class UpdateService : IUpdateService, IDisposable
 {
+    public event EventHandler<UpdateState> OnStateChanged = delegate { };
     public event UpdateEventHandler OnUpdateAvailable = delegate { };
     public event UpdateEventHandler OnUpdateRetrieved = delegate { };
     public event UpdateEventHandler OnUpdateSuccess = delegate { };
     public event UpdateEventHandler OnUpdateFailure = delegate { };
 
     public bool CanUpdate => State == UpdateState.Idle;
-
-    public void ClearUpdates() { throw new NotImplementedException(); }
 
     public event EventHandler<UpdateState> StateChanged = delegate { };
     public event EventHandler<UpdateInfo> UpdateChanged = delegate { };
@@ -24,6 +23,7 @@ public partial class UpdateService : IUpdateService, IDisposable
     private HttpClient _httpClient;
     private JsonSerializerOptions _serializerOptions;
     private UpdateState _state;
+    private List<string> _beingRetrieved = new();
 
     protected virtual TimeSpan ServiceCheckPeriod { get; } = TimeSpan.FromSeconds(5);
     protected virtual string ApiRoot { get; } = "/api";
@@ -83,6 +83,31 @@ public partial class UpdateService : IUpdateService, IDisposable
         _stateMonitor?.Wait();
     }
 
+    public async void ClearUpdates()
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync(
+                $"{ApiRoot}/{Endpoints.Updates}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                Updates.Clear();
+            }
+            else
+            {
+                // TODO: throw an appropriate exception
+            }
+        }
+        catch (Exception ex)
+        {
+            // TODO: catch only timeout here
+
+            // disconnect
+            State = UpdateState.Disconnected;
+        }
+    }
+
     public async void RetrieveUpdate(UpdateInfo updateInfo)
     {
         try
@@ -94,12 +119,21 @@ public partial class UpdateService : IUpdateService, IDisposable
                 Action = UpdateActions.Download
             });
 
+            if (existing.Retrieved)
+            {
+                throw new Exception($"Update {existing.ID} has already been retrieved");
+            }
+
+            _beingRetrieved.Add(updateInfo.ID);
+
             var response = await _httpClient.PutAsync(
                 $"{ApiRoot}/{(Endpoints.UpdateAction.Replace("{id}", updateInfo.ID))}",
                 payload);
 
             if (!response.IsSuccessStatusCode)
             {
+                _beingRetrieved.Remove(updateInfo.ID);
+
                 // TODO: throw an appropriate exception
             }
         }
@@ -201,11 +235,19 @@ public partial class UpdateService : IUpdateService, IDisposable
                         else
                         {
                             var changed = false;
+
                             // check for changes - only fields that might differ are retrieved and applied
                             if (Updates[update.ID].Retrieved != update.Retrieved)
                             {
                                 Updates[update.ID].Retrieved = update.Retrieved;
                                 changed = true;
+
+                                if (_beingRetrieved.Contains(update.ID))
+                                {
+                                    // we are actively retrieving this update
+                                    _beingRetrieved.Remove(update.ID);
+                                    OnUpdateRetrieved?.Invoke(this, update);
+                                }
                             }
                             if (Updates[update.ID].Applied != update.Applied)
                             {
@@ -234,8 +276,8 @@ public partial class UpdateService : IUpdateService, IDisposable
         {
             if (_cancellationToken != null && _cancellationToken.Token.IsCancellationRequested) break;
 
-            await GetDeviceInfo();
             await RefreshUpdateList();
+            await GetDeviceInfo();
 
             await Task.Delay(ServiceCheckPeriod);
         }

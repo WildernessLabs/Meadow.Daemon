@@ -109,6 +109,10 @@
 			Grid.Column="0"
 			Text="Available Updates:"
 			VerticalAlignment="Center"/>
+		<Label
+			Grid.Row="5"
+			Grid.Column="1"
+			 Content="{Binding Updates.Count}" />
 		<ListBox
 			Grid.Row="6"
 			Grid.ColumnSpan="2"			 

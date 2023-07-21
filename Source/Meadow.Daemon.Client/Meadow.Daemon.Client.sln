@@ -13,6 +13,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Meadow.Units", "..\..\..\Me
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Meadow.Logging", "..\..\..\Meadow.Logging\Source\Meadow.Logging\lib\Meadow.Logging.csproj", "{6C826C9C-7D07-4DDE-BEC4-9375EAA16597}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LinuxConsoleSample", "Samples\LinuxConsoleSample\LinuxConsoleSample.csproj", "{2B1B5230-309C-42A8-B1C7-D61778463F9E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,10 @@ Global
 		{6C826C9C-7D07-4DDE-BEC4-9375EAA16597}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6C826C9C-7D07-4DDE-BEC4-9375EAA16597}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6C826C9C-7D07-4DDE-BEC4-9375EAA16597}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B1B5230-309C-42A8-B1C7-D61778463F9E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B1B5230-309C-42A8-B1C7-D61778463F9E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B1B5230-309C-42A8-B1C7-D61778463F9E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B1B5230-309C-42A8-B1C7-D61778463F9E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

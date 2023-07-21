@@ -29,6 +29,14 @@ public class UpdateCollection : IEnumerable<UpdateInfo>
         }
     }
 
+    internal void Clear()
+    {
+        lock (_list)
+        {
+            _list.Clear();
+        }
+    }
+
     public IEnumerator<UpdateInfo> GetEnumerator()
     {
         return _list.GetEnumerator();
