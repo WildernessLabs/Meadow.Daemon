@@ -1,4 +1,4 @@
-use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}};
+use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::PathBuf};
 use actix_web::{App, Error, HttpResponse, HttpServer, web, Responder};
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,8 @@ struct ServiceInfo {
 #[derive(Serialize, Deserialize)]
 struct UpdateAction {
     action: String,
-    pid: i32
+    pid: i32,
+    app_dir: Option<String>
 }
 
 pub struct RestServer;
@@ -69,8 +70,6 @@ impl RestServer {
     }
 
     async fn get_daemon_info() -> Result<HttpResponse, Error> {
-        println!("REST GET DAEMON INFO");
-
         Ok(HttpResponse::Ok().json(&ServiceInfo {
             service: "Wilderness Labs Meadow".to_string(),
             up_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
@@ -106,31 +105,40 @@ impl RestServer {
             "apply" => {
                 println!("Apply update {}", id);
                 let pid = data.pid;
+                let  app_path;
+
+                match &data.app_dir {
+                    None => {
+                        match fs::read_link(format!("/proc/{}/exe", pid)) {
+                            Ok(path) => {
+                                app_path = path;
+                            },
+                            Err(_) => {
+                                let msg = format!("Caller sent in an invalid PID {}", data.pid);
+                                println!("{}", msg);
+                                return HttpResponse::NotFound().body(msg);
+                            }
+                        }    
+                    },
+                    Some(p) => {
+                        // TODO verify the provided path is valid?
+                        app_path = PathBuf::from(p);
+                    }
+                }
 
                 if pid != 0 {
-                    // a PID was passed in from the caller, find out who they are, where they are and their state
-                    match fs::read_link(format!("/proc/{}/exe", pid)) {
-                        Ok(link) => {
-                            // note: this will launch a thread to wait and apply
-                            match store
-                                .lock()
-                                .unwrap()
-                                .apply_update(&id, &link, pid)
-                                .await {
-                                    Ok(_result) => {
-                                        return HttpResponse::Ok().finish();
-                                    },
-                                    Err(msg) => {
-                                        return HttpResponse::NotFound().body(msg);
-                                    }
-                                }
+                    // note: this will launch a thread to wait and apply
+                    match store
+                        .lock()
+                        .unwrap()
+                        .apply_update(&id, &app_path, pid)
+                        .await {
+                        Ok(_result) => {
+                            return HttpResponse::Ok().finish();
                         },
-                        Err(_) => {
-                            let msg = format!("Caller sent in an invalid PID {}", data.pid);
-                            println!("{}", msg);
-                            return HttpResponse::NotFound().body(msg) ;
+                        Err(msg) => {
+                            return HttpResponse::NotFound().body(msg);
                         }
-
                     }
                 }
                 else {
@@ -164,7 +172,6 @@ impl RestServer {
     async fn get_updates(
         store: web::Data<Arc<Mutex<UpdateStore>>>) 
         -> Result<HttpResponse, Error> { //actix_web::Result<impl Responder> {
-        println!("REST GET UPDATE LIST");
 
         // open the store
         let updates = store

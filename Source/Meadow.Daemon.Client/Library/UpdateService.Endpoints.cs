@@ -22,9 +22,11 @@ public partial class UpdateService
     internal record UpdateAction
     {
         [JsonPropertyName("action")]
-        public string Action { get; set; }
+        public string Action { get; set; } = default!;
         [JsonPropertyName("pid")]
         public int Pid { get; set; }
+        [JsonPropertyName("app_dir")]
+        public string? AppDirectory { get; set; }
     }
 
     internal class JsonContent : StringContent

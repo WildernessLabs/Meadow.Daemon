@@ -51,6 +51,12 @@ public class MyApp
     private void OnUpdateRetrieved(object? sender, UpdateInfo e)
     {
         Console.WriteLine($"An update has been retrieved! (ID: {e.ID})");
+
+        if (!e.Applied)
+        {
+            Console.WriteLine($"Applying update ID '{e.ID}')");
+            _updateService.ApplyUpdate(e);
+        }
     }
 
     private void OnUpdateChanged(object? sender, UpdateInfo e)
@@ -61,6 +67,12 @@ public class MyApp
     private void OnUpdateAvailable(object? sender, UpdateInfo e)
     {
         Console.WriteLine($"An update is available! (ID: {e.ID})");
+
+        if (!e.Retrieved)
+        {
+            Console.WriteLine($"Retrieving Update ID '{e.ID}')");
+            _updateService.RetrieveUpdate(e);
+        }
     }
 
     public void Run()

@@ -145,6 +145,8 @@ impl UpdateStore {
     }
 
     pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32) -> Result<u64, String> {
+        println!("APPLYING UPDATE {}", id);
+
         let p = app_path.clone();
         let update = self.updates.get(id).unwrap().clone();
 
@@ -157,6 +159,7 @@ impl UpdateStore {
         // make sure it's a valid app update (i.e. has an `app` folder)
         let update_source_folder = Path::new(&update_temp_path).join("app");
         if !update_source_folder.is_dir() {
+            println!("Not a valid app update");
             return Err("Package does not contain a valid Application update".to_string());
         }
 
@@ -192,15 +195,23 @@ impl UpdateStore {
                         .overwrite(true)
                         .content_only(true);
 
-                        fs_extra::dir::copy(
+                        println!("Copying update from '{:?}' to '{}'", update_source_folder, application_folder);
+
+                        match fs_extra::dir::copy(
                             &update_source_folder,
                             application_folder,
-                            &opts
-                            ).unwrap();
+                            &opts) {
+                                Ok(_) => {
+                                    // todo: update the descriptor to "applied"
 
-                        // todo: update the descriptor to "applied"
+                                    // todo: restart the app
+                                },
+                                Err(e) => {
+                                    println!("Failed to copy update: {}", e);
+                                }
+                        }
 
-                        // todo: restart the app
+                        return;
                     }
                 }
             }

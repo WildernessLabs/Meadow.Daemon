@@ -1,5 +1,6 @@
 ﻿using Meadow.Update;
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 
 namespace Meadow.Daemon;
@@ -155,7 +156,8 @@ public partial class UpdateService : IUpdateService, IDisposable
             var payload = new JsonContent(new UpdateAction
             {
                 Action = UpdateActions.Apply,
-                Pid = Process.GetCurrentProcess().Id
+                Pid = Process.GetCurrentProcess().Id,
+                AppDirectory = Assembly.GetEntryAssembly().Location
             });
 
             var response = await _httpClient.PutAsync(
@@ -164,6 +166,10 @@ public partial class UpdateService : IUpdateService, IDisposable
 
             if (!response.IsSuccessStatusCode)
             {
+                // TODO: raise/call error handler?
+
+                var resp = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"ApplyUpdate Error ({response.StatusCode}: {resp})");
                 // TODO: throw an appropriate exception
             }
         }
