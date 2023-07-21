@@ -93,14 +93,19 @@ impl CloudSubscriber {
             .will_message(lwt)
             .finalize();
 
-        println!("making MQTT connection:\n");
-
+        loop {
+            println!("making MQTT connection:\n");
+            if let Ok(_) = client.connect(conn_opts.clone()) {
+                break;
+            }
+        }
+/*        
         // Connect and wait for it to complete or fail.
         if let Err(e) = client.connect(conn_opts) {
             println!("Unable to connect:\n\t{:?}", e);
             process::exit(1);
         }
-
+*/
         state_sender.send(UpdateState::Connected).unwrap();
 
         // Subscribe topics.

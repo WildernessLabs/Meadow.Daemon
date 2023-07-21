@@ -33,7 +33,7 @@ impl UpdateStore {
             fs::create_dir(&store.store_directory).unwrap();
         }
         else {
-            // TODO: load all existing update descriptors
+            // load all existing update descriptors
             for entry in fs::read_dir(&store.store_directory).unwrap() {
                 match entry {
                     Ok(e) => {
@@ -102,7 +102,45 @@ impl UpdateStore {
         self.updates.get(&id)
     }
 
+    pub fn remove_update(&mut self, mpak_id: String) {
+        for entry in fs::read_dir(self.store_directory.clone()).unwrap() {
+            match entry {
+                Ok(e) => {
+                    if e.file_name().into_string().unwrap() == mpak_id {
+                        if e.path().is_dir() {
+                            // it's a likely update folder, but look for (and parse) an info file to be sure
+                            for entry in fs::read_dir(e.path()).unwrap() {
+                                match entry {
+                                    Ok(f) => {
+                                        let fp = f.path();
+                                        let file_name = fp.file_name().unwrap_or(OsStr::new(""));
+                                        if fp.is_file() && file_name == Self::UPDATE_INFO_FILE_NAME {
+                                            fs::remove_dir_all(e.path()).unwrap();
+                                        }
+                                    },
+                                    Err(_e) => {
+                                        // TODO: ???
+                                    }
+                                }
+                            }
+                        }
+                        self.updates.remove(&mpak_id);
+                        return;
+                    }
+                },
+                Err(_e) => {
+                    // TODO: ???
+                }
+            }
+        }
+    }
+
     pub fn clear(&mut self) {
+        let id_list: Vec<String> = self.updates.keys().cloned().collect();
+        for id in id_list {
+            self.remove_update(id);
+        }
+
         self.updates.clear();
     }
 
@@ -171,8 +209,8 @@ impl UpdateStore {
         Ok(1)
     }
 
-    fn _extract_update_to_location(update: Arc<Mutex<UpdateDescriptor>>, file_name: String, destination_root: &String) -> Result<u64, String> {
-            let mut d = update.lock().unwrap();
+    fn _extract_update_to_location(_update: Arc<Mutex<UpdateDescriptor>>, file_name: String, destination_root: &String) -> Result<u64, String> {
+//            let mut d = update.lock().unwrap();
 
             let zip_file = File::open(file_name).unwrap();
             let mut archive = ZipArchive::new(zip_file).unwrap();

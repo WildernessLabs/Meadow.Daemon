@@ -46,11 +46,26 @@ impl RestServer {
                         .route("/info", web::get().to(Self::get_daemon_info))
                         .route("/updates", web::get().to(Self::get_updates))
                         .route("/updates/{id}", web::put().to(Self::update_action))
+                        .route("/updates", web::delete().to(Self::clear_update_store))
                 )
         })
             .bind(format!("0.0.0.0:{}", PORT))?
             .run()
             .await
+    }
+
+    async fn clear_update_store(
+        store: web::Data<Arc<Mutex<UpdateStore>>>)
+        -> Result<HttpResponse, Error> {
+
+        println!("REST CLEAR UPDATE STORE");
+
+        store
+            .lock()
+            .unwrap()
+            .clear();
+
+            Ok(HttpResponse::Ok().finish())
     }
 
     async fn get_daemon_info() -> Result<HttpResponse, Error> {
@@ -83,6 +98,7 @@ impl RestServer {
                             HttpResponse::Ok().finish()
                         },
                         Err(msg) => {
+                            println!("Error sending MPAK for {}: {}", id, msg);                         
                             HttpResponse::NotFound().body(msg) 
                         }
                     }
@@ -168,6 +184,7 @@ impl RestServer {
 
 
         // retrieve update info
+        println!("  sending {} results...", updates.len());
 
         Ok(HttpResponse::Ok().json(result))
     }
