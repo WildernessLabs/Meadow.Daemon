@@ -1,9 +1,11 @@
 use std::ffi::OsStr;
+use std::option;
 use std::sync::{Mutex, Arc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
+use std::process::{Command};
 use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy, BufReader};
 use zip::{ZipArchive};
@@ -144,7 +146,7 @@ impl UpdateStore {
         self.updates.clear();
     }
 
-    pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32) -> Result<u64, String> {
+    pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32, command: &Option<String>) -> Result<u64, String> {
         println!("APPLYING UPDATE {}", id);
 
         let p = app_path.clone();
@@ -164,6 +166,7 @@ impl UpdateStore {
         }
 
         // spawn a thread to wait for app shutdown
+        let local_command = command.clone();
 
         thread::spawn(move || {
             let application_folder = p.parent().unwrap().to_str().unwrap();
@@ -174,7 +177,7 @@ impl UpdateStore {
             println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
 
             loop {
-                // there's probably a better way to do this, but I can't find it
+                // dev note: there's probably a better way to do this, but I can't find it
                 // wait::waitpid only works for child processes
 
                 match proc_path.is_dir() {
@@ -204,8 +207,23 @@ impl UpdateStore {
                                 Ok(_) => {
                                     // todo: update the descriptor to "applied"
 
-                                    // todo: restart the app
-                                },
+                                    // restart the app
+                                    println!("Launching '{:?}'...", p);
+
+                                    match local_command {
+                                        None => {
+                                            let _app = Command::new(&p)
+                                            .spawn()
+                                            .expect("Failed to start process");                                
+                                        },
+                                        Some(cmd) => {
+                                            let _app = Command::new(cmd)
+                                            .arg(&p)
+                                            .spawn()
+                                            .expect("Failed to start process");                                
+                                        },
+                                    }
+                                }
                                 Err(e) => {
                                     println!("Failed to copy update: {}", e);
                                 }

@@ -25,7 +25,8 @@ struct ServiceInfo {
 struct UpdateAction {
     action: String,
     pid: i32,
-    app_dir: Option<String>
+    app_dir: Option<String>,
+    command: Option<String>
 }
 
 pub struct RestServer;
@@ -131,7 +132,7 @@ impl RestServer {
                     match store
                         .lock()
                         .unwrap()
-                        .apply_update(&id, &app_path, pid)
+                        .apply_update(&id, &app_path, pid, &data.command)
                         .await {
                         Ok(_result) => {
                             return HttpResponse::Ok().finish();
