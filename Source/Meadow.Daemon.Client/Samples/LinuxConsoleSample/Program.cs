@@ -21,8 +21,16 @@ public class MyApp
     public string ServiceAddress { get; set; } = "172.26.8.20";
     public int ServicePort { get; set; } = 5000;
 
+    public string VersionString = "1.0";
+
     public MyApp()
     {
+        var versionFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"{VersionString}.txt");
+        if (!File.Exists(versionFilePath))
+        {
+            File.CreateText(versionFilePath).Dispose();
+        }
+
         _updateService = new UpdateService(ServiceAddress, ServicePort);
 
         _updateService.OnUpdateAvailable += OnUpdateAvailable;

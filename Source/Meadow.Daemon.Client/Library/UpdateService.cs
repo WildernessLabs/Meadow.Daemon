@@ -157,7 +157,8 @@ public partial class UpdateService : IUpdateService, IDisposable
             {
                 Action = UpdateActions.Apply,
                 Pid = Process.GetCurrentProcess().Id,
-                AppDirectory = Assembly.GetEntryAssembly().Location
+                AppDirectory = Assembly.GetEntryAssembly().Location,
+                Command = "dotnet" // this is a .NET SDK, so we assume we're launching a .NET app
             });
 
             var response = await _httpClient.PutAsync(

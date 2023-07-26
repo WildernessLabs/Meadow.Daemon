@@ -27,6 +27,8 @@ public partial class UpdateService
         public int Pid { get; set; }
         [JsonPropertyName("app_dir")]
         public string? AppDirectory { get; set; }
+        [JsonPropertyName("command")]
+        public string? Command { get; set; }
     }
 
     internal class JsonContent : StringContent
