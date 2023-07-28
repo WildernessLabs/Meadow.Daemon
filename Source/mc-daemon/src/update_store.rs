@@ -8,9 +8,20 @@ use std::path::{Path, PathBuf};
 use std::process::{Command};
 use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy, BufReader};
+use serde::{Serialize, Deserialize};
 use zip::{ZipArchive};
+use reqwest::{Client};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
+
+#[derive(Serialize, Deserialize)]
+struct MeadowCloudLoginResponseMessage {
+    #[serde(alias = "encryptedKey")]
+    encrypted_key: String,
+    #[serde(alias = "encryptedToken")]
+    encrypted_token: String,
+    iv: String
+}
 
 pub struct UpdateStore {
     _settings: CloudSettings,
@@ -338,6 +349,43 @@ impl UpdateStore {
                 Err(format!("Update {} not known", id))
             }
         }
+    }
+
+    pub async fn authenticate_with_server(&self) -> bool {
+
+        let device_id = "abcdef";
+        let settings_host = "https://staging.meadowcloud.dev";
+
+        let json = format!("{{\"id\"=\"{}\" }}", device_id);
+
+        let endpoint = format!("{}/api/devices/login", settings_host);
+        println!("Attempting to login to {} with {}...", endpoint, json);
+
+        let client = Client::new();
+
+        match client
+            .post(endpoint)
+            .json(&json)
+            .send()
+            .await {
+                Ok(response) => {
+                    let status = response.status();
+                    let content = response.text().await.unwrap();
+                    if status.is_success() {
+                        let msg: MeadowCloudLoginResponseMessage = serde_json::from_str(&content).unwrap();
+                    }
+                    else {
+                        println!("Failed to login. Server returned a {}", status);
+                    }
+                },
+                Err(e) => {
+                    println!("Failed to login {}", e);
+                }
+            };
+
+//        var response = await client.PostAsync(endpoint, content);
+//        var responseContent = await response.Content.ReadAsStringAsync();
+        false
     }
 
     pub async fn retrieve_update(&self, id: &String) -> Result<u64, String> {
