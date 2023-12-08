@@ -1,16 +1,21 @@
 use std::ffi::OsStr;
-use std::option;
+use std::net::TcpListener;
 use std::sync::{Mutex, Arc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
-use std::process::{Command};
+use std::process::{Command, id};
 use std::fs::{self, OpenOptions, File};
-use std::io::{Write, Cursor, copy, BufReader};
+use std::io::{Write, Cursor, copy, BufRead, BufReader};
+use oauth2::basic::BasicClient;
+use oauth2::reqwest::http_client;
+use oauth2::{ClientId, ClientSecret, TokenUrl, AuthUrl, Scope, CsrfToken, PkceCodeChallenge, AuthorizationCode};
+use rsa::{RsaPublicKey, RsaPrivateKey};
+use rsa::rand_core::OsRng;
 use serde::{Serialize, Deserialize};
 use zip::{ZipArchive};
-use reqwest::{Client};
+use reqwest::{Client, Url};
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
@@ -21,6 +26,11 @@ struct MeadowCloudLoginResponseMessage {
     #[serde(alias = "encryptedToken")]
     encrypted_token: String,
     iv: String
+}
+
+#[derive(Serialize, Deserialize)]
+struct MeadowCloudLoginRequestMessage {
+    id: String,
 }
 
 pub struct UpdateStore {
@@ -351,12 +361,25 @@ impl UpdateStore {
         }
     }
 
+    pub fn test_creds(&self) -> bool {
+        let bits = 4096;
+        let private_key = RsaPrivateKey::new(&mut OsRng, bits).unwrap();
+        let public_key = RsaPublicKey::from(&private_key);
+    
+        // Export private key in PKCS#1 format, PEM encoded
+//        let mut file = File::create("/tmp/meadow.pem").unwrap();
+//        file.write_all(private_key.to_pem_pkcs1().unwrap().as_bytes()).unwrap();
+
+        false
+    }
+
     pub async fn authenticate_with_server(&self) -> bool {
 
-        let device_id = "abcdef";
-        let settings_host = "https://staging.meadowcloud.dev";
+        let device_id = "abcdef".to_string();
+        let settings_host = "https://staging.meadowcloud.dev".to_string();
 
-        let json = format!("{{\"id\"=\"{}\" }}", device_id);
+        let message = MeadowCloudLoginRequestMessage { id: device_id };
+        let json = serde_json::to_string(&message).unwrap();
 
         let endpoint = format!("{}/api/devices/login", settings_host);
         println!("Attempting to login to {} with {}...", endpoint, json);

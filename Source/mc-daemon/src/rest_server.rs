@@ -1,16 +1,30 @@
-use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::PathBuf};
+use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::{PathBuf, Path}, io::BufReader, fmt::format};
 use actix_web::{App, Error, HttpResponse, HttpServer, web, Responder};
 use serde::{Deserialize, Serialize};
+use std::process::{Command};
 
 use crate::{update_store::UpdateStore, update_descriptor::UpdateDescriptor};
 
 const PORT: &str = "5000";
 
+/*
 #[derive(Serialize, Deserialize)]
 struct File {
     name: String,
     up_time: u64,
     err: String,
+}
+*/
+
+#[derive(Serialize, Deserialize)]
+struct DeviceInfo {
+    serial_number: String,
+    device_name: String,
+    platform: String,
+    os_version: String,
+    os_release: String,
+    os_name: String,
+    machine: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -18,7 +32,9 @@ struct ServiceInfo {
     service: String,
     up_time: u64,
     version: String,
-    status: String
+    status: String,
+    device_info: DeviceInfo,
+    public_key: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -30,6 +46,83 @@ struct UpdateAction {
 }
 
 pub struct RestServer;
+
+fn trim_newline(s: &mut String) {
+    if s.ends_with('\n') {
+        s.pop();
+        if s.ends_with('\r') {
+            s.pop();
+        }
+    }
+}
+
+impl ServiceInfo {
+    pub fn new() -> ServiceInfo {
+
+        let mut sn = fs::read_to_string("/var/lib/dbus/machine-id").unwrap();
+        trim_newline(&mut sn);
+        let info = uname::uname().unwrap();
+
+        // todo: should this be in a separate service, maybe?
+
+        ServiceInfo {
+            service: "Wilderness Labs Meadow.Daemon".to_string(),
+            up_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            version: "1.0".to_string(), // TODO: actually get this number
+            status: "Running".to_string(),
+            device_info: DeviceInfo 
+            { 
+                serial_number: sn,
+                platform: "Meadow.Linux".to_string(), // TODO: pull from lscpu?
+                device_name: info.nodename,
+                os_version: info.version,
+                os_release: info.release,
+                os_name: info.sysname,
+                machine: info.machine
+            },
+            public_key: ServiceInfo::get_public_key_pem()
+        }
+    }
+
+    fn get_public_key_pem() -> String {
+        
+        // for now, we'll hard-code to using the key from 
+        let key_path = "/home/ctacke/.ssh";
+        let priv_key_file = "id_rsa";
+        let pub_key_file = "id_rsa.pub";
+
+        let pub_key_path = Path::new(&key_path).join(pub_key_file);
+        if !pub_key_path.is_file() {
+            return "[No Key Found]".to_string();
+        }
+        
+        // read the key
+        let mut pk_data =std::fs::read_to_string(&pub_key_path)
+            .expect("Unable to open public key file");
+
+        // if it's not a PEM, get the key in PEM format
+
+        if !pk_data.starts_with("-----BEGIN RSA PUBLIC KEY-----") {
+            let output = Command::new("ssh-keygen")
+                .arg("-e")
+                .arg("-m")
+                .arg("pem")
+                .arg("-f")
+                .arg(pub_key_path
+                    .into_os_string()
+                    .into_string()
+                    .unwrap())
+                .output()
+                .expect("failed to execute ssh-keygen");
+            
+            let err = String::from_utf8_lossy(&output.stderr).to_string();
+            pk_data = String::from_utf8_lossy(&output.stdout).to_string();
+        }
+        
+        pk_data
+    }
+
+}
 
 impl RestServer {
     pub fn new() -> RestServer {
@@ -71,12 +164,7 @@ impl RestServer {
     }
 
     async fn get_daemon_info() -> Result<HttpResponse, Error> {
-        Ok(HttpResponse::Ok().json(&ServiceInfo {
-            service: "Wilderness Labs Meadow".to_string(),
-            up_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-            version: "1.0".to_string(),
-            status: "Running".to_string()
-        }))
+        Ok(HttpResponse::Ok().json(&ServiceInfo::new()))
     }
 
     async fn update_action(
