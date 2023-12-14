@@ -59,7 +59,7 @@ fn trim_newline(s: &mut String) {
 impl ServiceInfo {
     pub fn new() -> ServiceInfo {
 
-        let mut sn = fs::read_to_string("/var/lib/dbus/machine-id").unwrap();
+        let mut sn = fs::read_to_string("/var/lib/dbus/machine-id").unwrap().to_uppercase();
         trim_newline(&mut sn);
         let info = uname::uname().unwrap();
 

@@ -11,18 +11,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut update_service = UpdateService::new(settings, machine_id.clone(), update_store.clone());
     
+    let mut rest_server = rest_server::RestServer::new();
+
+
+
+    let mut set = tokio::task::JoinSet::new();
+
+    set.spawn_local(async move { 
+        update_service.start().await; 
+    });
+    set.spawn_local(async move { 
+        rest_server.start(update_store).await; 
+    });
+
+    while let Some(res) = set.join_next().await {
+        let out = res?;
+    }
+
+    //    let us = std::thread::spawn(move || {
+//        handle.spawn(async { update_service.start() } ) });
+
+//    let rs = handle.spawn(rest_server.start(update_store).await);
+
+//    tokio::join!(us, rs);
+
 //    update_service.start();
 
+/*
     tokio::spawn(async move {
         update_service.start();
     }); 
 
-    let mut rest_server = rest_server::RestServer::new();
 
     match rest_server.start(update_store).await {
         Err(e) => { println!("Unable to start REST server: {}", e); },
         _ => { println!("daemon exited!"); }
     }
-    
+*/    
     Ok(())
 }

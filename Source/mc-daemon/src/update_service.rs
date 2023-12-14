@@ -1,5 +1,7 @@
-use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}};
-use tokio::time;
+use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, fs};
+use serde_json::json;
+use tokio::{time, runtime::{Runtime, Handle}};
+use reqwest::Client;
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor};
 
@@ -8,6 +10,7 @@ pub enum UpdateState {
     Dead,
     Disconnected,
     Authenticating,
+    Authenticated,
     Connecting,
     Connected,
     Idle,
@@ -46,7 +49,36 @@ impl UpdateService {
         }
     }
 
-    pub fn start(&mut self) {
+    //#[tokio::main] // this doesn't make it 'main' it just makes it synchonous (thanks for clarity, tokio!)
+    async fn _authenticate(&self) -> bool {
+        // connect to the cloud and get a JWT
+        let device_id = fs::read_to_string("/var/lib/dbus/machine-id")
+            .unwrap()
+            .trim()
+            .to_ascii_uppercase();
+
+        let client = Client::new();
+        let endpoint = format!("{}/api/devices/login", self.settings.auth_server_address.clone().unwrap_or("".to_string()));
+        let content = json!({
+            "id": device_id
+        });
+
+        match client.post(endpoint)
+            .header("Content-Type", "application/json")
+            .json(&content)
+            .send()
+            .await {
+                Ok(response) => {
+                    return true;
+                },
+                Err(e) => {
+                    println!("Failed to auth: {}", e);
+                    return false;
+                }
+            }
+    }
+
+    pub async fn start(&mut self) {
 
         let subscriber = Arc::new(Mutex::new(
             CloudSubscriber::new(
@@ -76,17 +108,21 @@ impl UpdateService {
                         self.state = UpdateState::Authenticating;
                     }
                     else {
-                        self.state = UpdateState::Connecting;
+                        self.state = UpdateState::Authenticated;
                     }
                 }
                 UpdateState::Authenticating => {
-                    // TODO
-                }
-                UpdateState::Connecting => {
+                    if self._authenticate().await {
+                            self.state = UpdateState::Authenticated;
+                    }
+                },
+                UpdateState::Authenticated => {
                     let s = subscriber.clone();
                     let upd_snd = self.update_sender.clone();
                     let st_snd = self.state_sender.clone();
 
+                    // this spawns a cloud MQTT listener/subscriber.
+                    // when it connects, it will update the state to connected
                     thread::spawn(move || {
                         s
                             .lock()
@@ -94,7 +130,10 @@ impl UpdateService {
                             .start(upd_snd, st_snd);
                     });
 
-                    
+                    self.state = UpdateState::Connecting;
+                },
+                UpdateState::Connecting => {
+                    // just waiting for connected state
                 },
                 UpdateState::Connected => {
                     // look for any message from the subscriber
