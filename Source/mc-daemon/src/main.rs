@@ -21,11 +21,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         update_service.start().await; 
     });
     set.spawn_local(async move { 
-        rest_server.start(update_store).await; 
+        let _ = rest_server.start(update_store).await; 
     });
 
     while let Some(res) = set.join_next().await {
-        let out = res?;
+        let _out = res?;
     }
 
     //    let us = std::thread::spawn(move || {

@@ -1,9 +1,21 @@
 use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, fs};
 use serde_json::json;
-use tokio::{time, runtime::{Runtime, Handle}};
+use serde::{Deserialize, Serialize};
+use tokio::time;
 use reqwest::Client;
+use base64;
+use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
 
-use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor};
+use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
+
+#[derive(Serialize, Deserialize)]
+struct CloudLoginResponse {
+    #[serde(rename = "encryptedKey")]
+    pub encrypted_key: String,
+    #[serde(rename = "encryptedToken")]
+    pub encrypted_token: String,
+    pub iv: String
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateState {
@@ -27,7 +39,8 @@ pub struct UpdateService {
     update_sender: Sender<UpdateDescriptor>,
     update_receiver: Receiver<UpdateDescriptor>,
     state_sender: Sender<UpdateState>,
-    state_receiver: Receiver<UpdateState>
+    state_receiver: Receiver<UpdateState>,
+    jwt: String
 }
 
 impl UpdateService {
@@ -45,12 +58,13 @@ impl UpdateService {
             update_sender,
             update_receiver,
             state_sender,
-            state_receiver
+            state_receiver,
+            jwt: String::new()
         }
     }
 
     //#[tokio::main] // this doesn't make it 'main' it just makes it synchonous (thanks for clarity, tokio!)
-    async fn _authenticate(&self) -> bool {
+    async fn _authenticate(&mut self) -> bool {
         // connect to the cloud and get a JWT
         let device_id = fs::read_to_string("/var/lib/dbus/machine-id")
             .unwrap()
@@ -69,6 +83,14 @@ impl UpdateService {
             .send()
             .await {
                 Ok(response) => {
+                    let json = response.text().await.unwrap();
+                    let clr: CloudLoginResponse = serde_json::from_str(&json).unwrap();
+                    let encrypted_key_bytes = base64::decode(clr.encrypted_key).unwrap();
+                    let private_key_pem = Crypto::get_private_key_pem();
+                    let private_key = RsaPrivateKey::from_pkcs1_pem(&private_key_pem).unwrap();
+                    let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
+
+                    self.jwt = "foo".to_string();
                     return true;
                 },
                 Err(e) => {
@@ -120,6 +142,7 @@ impl UpdateService {
                     let s = subscriber.clone();
                     let upd_snd = self.update_sender.clone();
                     let st_snd = self.state_sender.clone();
+                    let jwt_copy = self.jwt.clone();
 
                     // this spawns a cloud MQTT listener/subscriber.
                     // when it connects, it will update the state to connected
@@ -127,7 +150,7 @@ impl UpdateService {
                         s
                             .lock()
                             .unwrap()
-                            .start(upd_snd, st_snd);
+                            .start(upd_snd, st_snd, jwt_copy);
                     });
 
                     self.state = UpdateState::Connecting;

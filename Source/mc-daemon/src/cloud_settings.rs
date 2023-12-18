@@ -1,5 +1,5 @@
-use std::fs::{read_to_string};
-use std::path::{Path};
+use std::fs::read_to_string;
+use std::path::Path;
 
 #[derive(Clone)]
 pub struct CloudSettings {

@@ -1,11 +1,11 @@
 
 extern crate paho_mqtt as mqtt;
 
-use std::{ process, thread, time::Duration};
-use std::sync::{mpsc::Sender};
-use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings, update_service::{UpdateState}, update_descriptor::UpdateDescriptor};
+use std::{ process, thread, time::Duration, sync::mpsc::Sender};
+use crate::{update_parser::UpdateParser, cloud_settings::CloudSettings, update_service::UpdateState, update_descriptor::UpdateDescriptor};
 
 const DFLT_CLIENT:&str = "mc_daemon";
+
 
 pub struct CloudSubscriber {
     settings: CloudSettings,
@@ -62,20 +62,22 @@ impl CloudSubscriber {
         }
     }
 
-    pub fn start(&self, sender: Sender<UpdateDescriptor>, state_sender: Sender<UpdateState>) { 
+    pub fn start(&self, sender: Sender<UpdateDescriptor>, state_sender: Sender<UpdateState>, jwt: String) { 
         let host = format!("{}:{}", self.settings.update_server_address, self.settings.update_server_port);
 
         // Define the set of options for the create.
         // Use an ID for a persistent session.
         let create_opts = mqtt::CreateOptionsBuilder::new()
-            .server_uri(host)
+            .server_uri(&host)
+            .mqtt_version(mqtt::MQTT_VERSION_5)
             .client_id(DFLT_CLIENT.to_string())
             .finalize();
 
         // Create a client.
-        let client = mqtt::Client::new(create_opts).unwrap_or_else(|err| {
-            println!("Error creating the client: {:?}", err);
-            process::exit(1);
+        let client = mqtt::Client::new(create_opts)
+            .unwrap_or_else(|err| {
+                println!("Error creating the client: {:?}", err);
+                process::exit(1);
         });
 
         // Initialize the consumer before connecting.
@@ -91,12 +93,24 @@ impl CloudSubscriber {
             .keep_alive_interval(Duration::from_secs(20))
             .clean_session(false)
             .will_message(lwt)
+            .user_name(self.machine_id.clone())
+            .password(jwt)
+            .ssl_options(mqtt::SslOptionsBuilder::new()
+                .trust_store("/etc/ssl/ca-certificates.crt")
+                .unwrap()
+                .finalize()                
+            )            
             .finalize();
 
         loop {
-            println!("making MQTT connection:\n");
-            if let Ok(_) = client.connect(conn_opts.clone()) {
-                break;
+            println!("making MQTT connection to {}:\n", host);
+            match client.connect(conn_opts.clone()) {
+                Ok(_response) => {
+                    break;
+                },
+                Err(e) => {
+                    println!("MQTT connection failed: {}\n", e);
+                }
             }
         }
 /*        

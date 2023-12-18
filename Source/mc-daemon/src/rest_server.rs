@@ -1,9 +1,8 @@
-use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::{PathBuf, Path}, io::BufReader, fmt::format};
+use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::PathBuf};
 use actix_web::{App, Error, HttpResponse, HttpServer, web, Responder};
 use serde::{Deserialize, Serialize};
-use std::process::{Command};
 
-use crate::{update_store::UpdateStore, update_descriptor::UpdateDescriptor};
+use crate::{update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
 
 const PORT: &str = "5000";
 
@@ -80,48 +79,9 @@ impl ServiceInfo {
                 os_name: info.sysname,
                 machine: info.machine
             },
-            public_key: ServiceInfo::get_public_key_pem()
+            public_key: Crypto::get_public_key_pem()
         }
     }
-
-    fn get_public_key_pem() -> String {
-        
-        // for now, we'll hard-code to using the key from 
-        let key_path = "/home/ctacke/.ssh";
-        let priv_key_file = "id_rsa";
-        let pub_key_file = "id_rsa.pub";
-
-        let pub_key_path = Path::new(&key_path).join(pub_key_file);
-        if !pub_key_path.is_file() {
-            return "[No Key Found]".to_string();
-        }
-        
-        // read the key
-        let mut pk_data =std::fs::read_to_string(&pub_key_path)
-            .expect("Unable to open public key file");
-
-        // if it's not a PEM, get the key in PEM format
-
-        if !pk_data.starts_with("-----BEGIN RSA PUBLIC KEY-----") {
-            let output = Command::new("ssh-keygen")
-                .arg("-e")
-                .arg("-m")
-                .arg("pem")
-                .arg("-f")
-                .arg(pub_key_path
-                    .into_os_string()
-                    .into_string()
-                    .unwrap())
-                .output()
-                .expect("failed to execute ssh-keygen");
-            
-            let err = String::from_utf8_lossy(&output.stderr).to_string();
-            pk_data = String::from_utf8_lossy(&output.stdout).to_string();
-        }
-        
-        pk_data
-    }
-
 }
 
 impl RestServer {

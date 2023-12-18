@@ -1,21 +1,14 @@
 use std::ffi::OsStr;
-use std::net::TcpListener;
 use std::sync::{Mutex, Arc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 use std::{collections::HashMap, ops::Deref};
 use std::path::{Path, PathBuf};
-use std::process::{Command, id};
+use std::process::Command;
 use std::fs::{self, OpenOptions, File};
-use std::io::{Write, Cursor, copy, BufRead, BufReader};
-use oauth2::basic::BasicClient;
-use oauth2::reqwest::http_client;
-use oauth2::{ClientId, ClientSecret, TokenUrl, AuthUrl, Scope, CsrfToken, PkceCodeChallenge, AuthorizationCode};
-use rsa::{RsaPublicKey, RsaPrivateKey};
-use rsa::rand_core::OsRng;
+use std::io::{Write, Cursor, copy, BufReader};
 use serde::{Serialize, Deserialize};
-use zip::{ZipArchive};
-use reqwest::{Client, Url};
+use zip::ZipArchive;
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
@@ -359,56 +352,6 @@ impl UpdateStore {
                 Err(format!("Update {} not known", id))
             }
         }
-    }
-
-    pub fn test_creds(&self) -> bool {
-        let bits = 4096;
-        let private_key = RsaPrivateKey::new(&mut OsRng, bits).unwrap();
-        let public_key = RsaPublicKey::from(&private_key);
-    
-        // Export private key in PKCS#1 format, PEM encoded
-//        let mut file = File::create("/tmp/meadow.pem").unwrap();
-//        file.write_all(private_key.to_pem_pkcs1().unwrap().as_bytes()).unwrap();
-
-        false
-    }
-
-    pub async fn authenticate_with_server(&self) -> bool {
-
-        let device_id = "abcdef".to_string();
-        let settings_host = "https://staging.meadowcloud.dev".to_string();
-
-        let message = MeadowCloudLoginRequestMessage { id: device_id };
-        let json = serde_json::to_string(&message).unwrap();
-
-        let endpoint = format!("{}/api/devices/login", settings_host);
-        println!("Attempting to login to {} with {}...", endpoint, json);
-
-        let client = Client::new();
-
-        match client
-            .post(endpoint)
-            .json(&json)
-            .send()
-            .await {
-                Ok(response) => {
-                    let status = response.status();
-                    let content = response.text().await.unwrap();
-                    if status.is_success() {
-                        let msg: MeadowCloudLoginResponseMessage = serde_json::from_str(&content).unwrap();
-                    }
-                    else {
-                        println!("Failed to login. Server returned a {}", status);
-                    }
-                },
-                Err(e) => {
-                    println!("Failed to login {}", e);
-                }
-            };
-
-//        var response = await client.PostAsync(endpoint, content);
-//        var responseContent = await response.Content.ReadAsStringAsync();
-        false
     }
 
     pub async fn retrieve_update(&self, id: &String) -> Result<u64, String> {

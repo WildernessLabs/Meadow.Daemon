@@ -6,5 +6,5 @@ async fn authentication_test() {
     let mut store = UpdateStore::new(settings);
 
 //    let success = store.authenticate_with_server().await;
-    let success = store.test_creds();
+    //let success = store.test_creds();
 }
