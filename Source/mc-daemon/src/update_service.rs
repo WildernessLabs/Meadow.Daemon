@@ -1,9 +1,12 @@
 use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, fs};
+use oauth2::http::StatusCode;
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use tokio::time;
 use reqwest::Client;
 use base64;
+use base64::engine::general_purpose;
+use base64::Engine;
 use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
@@ -72,10 +75,14 @@ impl UpdateService {
             .to_ascii_uppercase();
 
         let client = Client::new();
-        let endpoint = format!("{}/api/devices/login", self.settings.auth_server_address.clone().unwrap_or("".to_string()));
+        let endpoint = format!("{}/api/devices/login", self.settings.auth_server_address
+            .clone()
+            .unwrap_or("https://www.meadowcloud.co".to_string()));
         let content = json!({
             "id": device_id
         });
+
+        println!("Log in at {}", endpoint);
 
         match client.post(endpoint)
             .header("Content-Type", "application/json")
@@ -83,18 +90,38 @@ impl UpdateService {
             .send()
             .await {
                 Ok(response) => {
-                    let json = response.text().await.unwrap();
-                    let clr: CloudLoginResponse = serde_json::from_str(&json).unwrap();
-                    let encrypted_key_bytes = base64::decode(clr.encrypted_key).unwrap();
-                    let private_key_pem = Crypto::get_private_key_pem();
-                    let private_key = RsaPrivateKey::from_pkcs1_pem(&private_key_pem).unwrap();
-                    let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
 
-                    self.jwt = "foo".to_string();
-                    return true;
+                    match response.status() {
+                        reqwest::StatusCode::OK => {
+                            let json = response.text().await.unwrap();
+
+                            let clr_result: Result<CloudLoginResponse, _> = serde_json::from_str(&json);
+                            match clr_result {
+                                Ok(clr) => {
+                                    let encrypted_key_bytes = general_purpose::STANDARD.decode(clr.encrypted_key).unwrap();
+                                    let private_key_pem = Crypto::get_private_key_pem();
+                                    let private_key = RsaPrivateKey::from_pkcs1_pem(&private_key_pem).unwrap();
+                                    let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
+                
+                                    self.jwt = "foo".to_string();
+                                    return true;
+                                }
+                                Err(e) => {
+                                    // Print the JSON and the error message in case of failure
+                                    eprintln!("Failed to parse JSON: {}\nOriginal JSON: {}", e, json);
+                                    return false;
+                                }
+                            }        
+                        }
+                        _=> {
+                            eprintln!("Login call returned a: {}", response.status());
+                            return false;
+                        }
+
+                    }
                 },
                 Err(e) => {
-                    println!("Failed to auth: {}", e);
+                    eprintln!("Failed to auth: {}", e);
                     return false;
                 }
             }

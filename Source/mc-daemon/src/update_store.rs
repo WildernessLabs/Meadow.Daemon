@@ -46,7 +46,7 @@ impl UpdateStore {
         println!("Update data will be stored in '{:?}'", store.store_directory);
 
         if ! store.store_directory.exists() {
-            fs::create_dir(&store.store_directory).unwrap();
+            fs::create_dir_all(&store.store_directory).unwrap();
         }
         else {
             // load all existing update descriptors
