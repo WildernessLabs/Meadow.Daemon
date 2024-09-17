@@ -1,15 +1,18 @@
-use std::{thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, fs};
-use oauth2::http::StatusCode;
-use serde_json::json;
+use std::{error::Error, thread::{sleep, self}, sync::{Mutex, Arc, mpsc::{self, Sender, Receiver}}, fs};
+use serde_json::{json, Value};
 use serde::{Deserialize, Serialize};
 use tokio::time;
 use reqwest::Client;
 use base64;
 use base64::engine::general_purpose;
-use base64::Engine;
+use base64::{Engine, DecodeError};
 use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
+use std::time::Duration;
+use cbc::cipher::{KeyIvInit, BlockDecryptMut, generic_array::GenericArray, typenum::U16};
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
+
+type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
 #[derive(Serialize, Deserialize)]
 struct CloudLoginResponse {
@@ -43,7 +46,9 @@ pub struct UpdateService {
     update_receiver: Receiver<UpdateDescriptor>,
     state_sender: Sender<UpdateState>,
     state_receiver: Receiver<UpdateState>,
-    jwt: String
+    jwt: String,
+    oid: String,
+    auth_fail_count: u32
 }
 
 impl UpdateService {
@@ -62,10 +67,62 @@ impl UpdateService {
             update_receiver,
             state_sender,
             state_receiver,
-            jwt: String::new()
+            jwt: String::new(),
+            oid: String::new(),
+            auth_fail_count: 0
         }
     }
 
+    fn _extract_oid_from_jwt(&self, jwt: String) -> Result<String, Box<dyn Error>> {
+        // Split the JWT by '.'
+        let parts: Vec<&str> = jwt.split('.').collect();
+        
+        // Check if the JWT has at least 3 parts
+        if parts.len() < 3 {
+            return Err("invalid jwt segment length".into());
+        }
+        
+        // Extract the second part (payload)
+        let payload = parts[1];
+        
+        // Decode the base64 payload
+        let decoded = base64::decode(payload)?;
+        
+        // Convert the decoded bytes to a String
+        let decoded_str = String::from_utf8(decoded)?;
+        
+        // Parse the string as JSON
+        let json_value: Value = serde_json::from_str(&decoded_str)?;
+        
+        // Extract the "oid" field
+        if let Some(oid) = json_value.get("oid") {
+            if let Some(oid_str) = oid.as_str() {
+                return Ok(oid_str.to_string());
+            }
+        }
+
+        Err("oid not found".into())
+    }
+
+    fn _remove_pkcs7_padding(&self, mut data: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        if let Some(&padding_byte) = data.last() {
+            let padding_length = padding_byte as usize;
+    
+            if padding_length == 0 || padding_length > data.len() {
+                return Err("Invalid PKCS7 padding".into());
+            }
+    
+            if data[data.len() - padding_length..].iter().all(|&b| b == padding_byte) {
+                data.truncate(data.len() - padding_length);
+                Ok(data)
+            } else {
+                Err("Invalid PKCS7 padding".into())
+            }
+        } else {
+            Err("Failed to remove padding: Data is empty".into())
+        }
+    }
+    
     //#[tokio::main] // this doesn't make it 'main' it just makes it synchonous (thanks for clarity, tokio!)
     async fn _authenticate(&mut self) -> bool {
         // connect to the cloud and get a JWT
@@ -92,6 +149,11 @@ impl UpdateService {
                 Ok(response) => {
 
                     match response.status() {
+                        reqwest::StatusCode::NOT_FOUND => {
+                            eprintln!("ID not found.  This device needs to be (re)provisioned.");
+                            // TODO: return a state that says "failed and don't retry"
+                            return false;
+                        }
                         reqwest::StatusCode::OK => {
                             let json = response.text().await.unwrap();
 
@@ -100,19 +162,56 @@ impl UpdateService {
                                 Ok(clr) => {
                                     let encrypted_key_bytes = general_purpose::STANDARD.decode(clr.encrypted_key).unwrap();
                                     let private_key_pem = Crypto::get_private_key_pem();
-                                    let private_key = RsaPrivateKey::from_pkcs1_pem(&private_key_pem).unwrap();
-                                    let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
+                                    let key_result = RsaPrivateKey::from_pkcs1_pem(&private_key_pem);
+                                    match key_result {
+                                        Ok(private_key) => {
+                                            let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
                 
-                                    self.jwt = "foo".to_string();
-                                    return true;
+                                            // Base64 decode the inputs
+                                            let encrypted_token_bytes = base64::decode(clr.encrypted_token).unwrap();
+                                            let iv_bytes = base64::decode(clr.iv).unwrap();
+
+
+                                            // Initialize the AES-256 CBC decryptor
+                                            let mut decryptor = Aes256CbcDec::new(GenericArray::from_slice(&_decrypted_key), GenericArray::from_slice(&iv_bytes));
+
+                                            // Split the encrypted data into blocks of 16 bytes
+                                            let mut blocks: Vec<GenericArray<u8, U16>> = encrypted_token_bytes
+                                            .chunks_exact(16)
+                                            .map(|chunk| GenericArray::clone_from_slice(chunk))
+                                            .collect();
+
+                                            // Decrypt the blocks
+                                            decryptor.decrypt_blocks_mut(&mut blocks);
+
+                                            // Combine the decrypted blocks back into a single Vec<u8>
+                                            let mut decrypted_buffer: Vec<u8> = Vec::with_capacity(encrypted_token_bytes.len());
+                                            for block in blocks {
+                                                decrypted_buffer.extend_from_slice(&block);
+                                            }
+
+                                            let decrypted_token_bytes = self._remove_pkcs7_padding(decrypted_buffer).unwrap();
+
+                                            // Convert decrypted bytes to a UTF-8 string
+                                            self.jwt = String::from_utf8(decrypted_token_bytes).unwrap();
+                                            self.oid = self._extract_oid_from_jwt(self.jwt.clone()).unwrap(); 
+
+                                            return true;        
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to decrypt private key: {}", e);
+                                            return false;        
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     // Print the JSON and the error message in case of failure
                                     eprintln!("Failed to parse JSON: {}\nOriginal JSON: {}", e, json);
+                                    // TODO: return a state that says "failed and don't retry"
                                     return false;
                                 }
                             }        
-                        }
+                        }                        
                         _=> {
                             eprintln!("Login call returned a: {}", response.status());
                             return false;
@@ -132,7 +231,8 @@ impl UpdateService {
         let subscriber = Arc::new(Mutex::new(
             CloudSubscriber::new(
                 self.settings.clone(), 
-                self.machine_id.clone()
+                self.machine_id.to_ascii_uppercase().clone(),
+                String::new()
                 )));
         
 //        sleep(time::Duration::from_secs(self.settings.connect_retry_seconds));
@@ -162,7 +262,15 @@ impl UpdateService {
                 }
                 UpdateState::Authenticating => {
                     if self._authenticate().await {
-                            self.state = UpdateState::Authenticated;
+                        self.state = UpdateState::Authenticated;
+                        self.auth_fail_count = 0;
+                    }
+                    else {
+                        // adaptively get slower with fails, to a max time of 1min
+                        if self.auth_fail_count < 12 {
+                            self.auth_fail_count = self.auth_fail_count + 1;
+                        }
+                        thread::sleep(Duration::from_secs(u64::from(self.auth_fail_count * 5)));
                     }
                 },
                 UpdateState::Authenticated => {
@@ -170,6 +278,7 @@ impl UpdateService {
                     let upd_snd = self.update_sender.clone();
                     let st_snd = self.state_sender.clone();
                     let jwt_copy = self.jwt.clone();
+                    let oid_copy = self.oid.clone();
 
                     // this spawns a cloud MQTT listener/subscriber.
                     // when it connects, it will update the state to connected
@@ -177,7 +286,7 @@ impl UpdateService {
                         s
                             .lock()
                             .unwrap()
-                            .start(upd_snd, st_snd, jwt_copy);
+                            .start(upd_snd, st_snd, jwt_copy, oid_copy);
                     });
 
                     self.state = UpdateState::Connecting;

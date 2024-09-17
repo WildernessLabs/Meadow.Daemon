@@ -9,14 +9,16 @@ const DFLT_CLIENT:&str = "mc_daemon";
 
 pub struct CloudSubscriber {
     settings: CloudSettings,
-    machine_id: String
+    machine_id: String,
+    oid: String
 }
 
 impl CloudSubscriber {
     pub fn new(settings: CloudSettings, 
-               machine_id: String
+               machine_id: String,
+               oid: String
                 ) -> CloudSubscriber {
-        CloudSubscriber { settings, machine_id }
+        CloudSubscriber { settings, machine_id, oid }
     }
 
     // Reconnect to the broker when connection is lost.
@@ -39,13 +41,15 @@ impl CloudSubscriber {
         
         for topic in topics {
             // do macro substitution for '{ID}'
-            let t = topic.replace("{ID}", &self.machine_id);
+            let t = topic
+                .replace("{ID}", &self.machine_id)
+                .replace("{OID}", &self.oid);
 
-            println!("Subscribing to {}", topic);
+            println!("Subscribing to {}", t);
 
             // QOS == 2 means deliver exactly once
             if let Err(e) = cli.subscribe(t.as_str(), 2) {
-                println!("Error subscribing to {} {:?}", topic, e);
+                println!("Error subscribing to {} {:?}", t, e);
             }
         }
     }
@@ -62,8 +66,9 @@ impl CloudSubscriber {
         }
     }
 
-    pub fn start(&self, sender: Sender<UpdateDescriptor>, state_sender: Sender<UpdateState>, jwt: String) { 
+    pub fn start(&mut self, sender: Sender<UpdateDescriptor>, state_sender: Sender<UpdateState>, jwt: String, oid: String) { 
         let host = format!("{}:{}", self.settings.update_server_address, self.settings.update_server_port);
+        self.oid = oid;
 
         // Define the set of options for the create.
         // Use an ID for a persistent session.

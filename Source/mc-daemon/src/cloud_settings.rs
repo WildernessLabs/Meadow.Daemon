@@ -22,8 +22,8 @@ impl CloudSettings {
             use_authentication: true,
             auth_server_address: Some("https://www.meadowcloud.co".to_string()),
             auth_server_port: None,
-             mqtt_topics: vec!["ota".to_string(), "ota/{ID}/updates".to_string()],
-             connect_retry_seconds: 15
+            mqtt_topics: vec!["{OID}/ota/{ID}".to_string()],
+            connect_retry_seconds: 15
         }
     }
 

@@ -33,8 +33,8 @@ pub struct UpdateStore {
 }
 
 impl UpdateStore {
-    const STORE_ROOT_FOLDER:&str = "/home/ctacke/meadow/updates";
-    const UPDATE_INFO_FILE_NAME: &str = "info.json";
+    pub const STORE_ROOT_FOLDER: &'static str = "/home/ctacke/meadow/updates";
+    const UPDATE_INFO_FILE_NAME: &'static str = "info.json";
 
     pub fn new(settings: CloudSettings) -> UpdateStore {
         let mut store = UpdateStore {
