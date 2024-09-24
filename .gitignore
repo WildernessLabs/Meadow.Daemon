@@ -2,3 +2,4 @@ debug/
 target/
 .vs/
 obj/
+Cargo.lock

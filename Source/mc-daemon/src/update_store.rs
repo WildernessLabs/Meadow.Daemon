@@ -339,7 +339,7 @@ impl UpdateStore {
                 }
             
                 // mark as "applied"
-                d.applied = true;
+                d.applied = Some(true);
 
                 // update file
                 self.save_or_update(&d);
@@ -385,7 +385,7 @@ impl UpdateStore {
                                 let size = copy(&mut content, &mut file).unwrap();
                 
                                 // set the update as retrieved
-                                d.retrieved = true;
+                                d.retrieved = Some(true);
                 
                                 // update file
                                 self.save_or_update(d.deref());

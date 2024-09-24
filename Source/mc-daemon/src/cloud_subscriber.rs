@@ -37,31 +37,40 @@ impl CloudSubscriber {
     }
 
     // Subscribes to multiple topics.
-    fn subscribe_topics(&self, cli: &mqtt::Client, topics: &Vec<String>) {
+    fn subscribe_topics(&self, cli: &mqtt::Client, topics: &[String]) {
         
         for topic in topics {
-            // do macro substitution for '{ID}'
-            let t = topic
+            // do macro substitution
+            let topic = topic
                 .replace("{ID}", &self.machine_id)
-                .replace("{OID}", &self.oid);
+                .replace("{OID}", &self.oid)
+                .trim()
+                .to_string();
 
-            println!("Subscribing to {}", t);
+            println!("Subscribing to '{}'", topic);
 
-            // QOS == 2 means deliver exactly once
-            if let Err(e) = cli.subscribe(t.as_str(), 2) {
-                println!("Error subscribing to {} {:?}", t, e);
+            match cli.subscribe(&topic, 0) {
+                Ok(_) => {
+                    println!("Successfully subscribed to topic: '{}'", topic);
+                }
+                Err(e) => {
+                    println!("Error subscribing to topic: '{}' - {:?}", topic, e);
+                }
             }
         }
     }
 
     fn unsubscribe_topics(&self, cli: &mqtt::Client, topics: &Vec<String>) {
         for topic in topics {
-            // do macro substitution for '{ID}'
-            let t = topic.replace("{ID}", &self.machine_id);
+            // do macro substitution
+            let t = topic
+                .replace("{ID}", &self.machine_id)
+                .replace("{OID}", &self.oid);
 
-            // QOS == 2 means deliver exactly once
+            println!("Unssubscribing from {}", t);
+
             if let Err(e) = cli.unsubscribe(t.as_str()) {
-                println!("Error subscribing to {} {:?}", topic, e);
+                println!("Error unsubscribing from {} {:?}", t, e);
             }
         }
     }
@@ -118,34 +127,51 @@ impl CloudSubscriber {
                 }
             }
         }
-/*        
-        // Connect and wait for it to complete or fail.
-        if let Err(e) = client.connect(conn_opts) {
-            println!("Unable to connect:\n\t{:?}", e);
-            process::exit(1);
-        }
-*/
+
         state_sender.send(UpdateState::Connected).unwrap();
 
-        // Subscribe topics.
+        // Subscribe to topics.
         self.subscribe_topics(&client, &self.settings.mqtt_topics);
 
         println!("Processing requests...");
+
+        loop {
+            match receiver.recv() {
+                Ok(Some(msg)) => {
+                    println!("Received message: {:?}", msg);
+                    // Process the message here
+
+                    let update = UpdateParser::parse_message(msg.payload_str().as_ref());
+
+                    // println!("{:?}", update);
+                    // pass the descriptor back to the update service
+                    sender.send(update).unwrap();
+                }
+                Ok(None) => {
+                    println!("No message received, but client is still active.");
+
+                    if !client.is_connected() {
+                        if self.try_reconnect(&client) {
+                            println!("Resubscribe to topics...");
+                            self.subscribe_topics(&client, &self.settings.mqtt_topics);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Err(err) => {
+                    println!("Error receiving message: {:?}", err);
+                    break; // Optionally break out of the loop on error
+                }
+            }
+        }
+
         for msg in receiver.iter() {
             if let Some(msg) = msg {
-                let update = UpdateParser::parse_message(msg.payload_str().as_ref());
+                println!("Received message: {:?}", msg);
 
-                // println!("{:?}", update);
-                // pass the descriptor back to the update service
-                sender.send(update).unwrap();
             }
-            else if !client.is_connected() {
-                if self.try_reconnect(&client) {
-                    println!("Resubscribe to topics...");
-                    self.subscribe_topics(&client, &self.settings.mqtt_topics);
-                } else {
-                    break;
-                }
+            else {
             }
         }
 

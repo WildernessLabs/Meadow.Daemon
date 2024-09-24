@@ -2,30 +2,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateDescriptor {
-    #[serde(rename = "MpakID")]
+    #[serde(rename = "mpakId")]
     pub mpak_id: String,
-    #[serde(rename = "MpakDownloadUrl")]
+    #[serde(rename = "mpakDownloadUrl")]
     pub mpak_download_url: String,
-    #[serde(rename = "TargetDevices")]
-    pub target_devices: Option<String>,
-    #[serde(rename = "PublishedOn")]
+    #[serde(rename = "targetDevices")]
+    pub target_devices: Option<Vec<String>>,
+    #[serde(rename = "publishedOn")]
     pub published_on: String,
-    #[serde(rename = "UpdateType")]
-    pub update_type: i32,
-    #[serde(rename = "Version")]
-    pub version: String,
-    #[serde(rename = "DownloadSize")]
-    pub download_size: u32,
-    #[serde(rename = "Summary")]
+    #[serde(rename = "crc")]
+    pub crc: String,
+    #[serde(rename = "version")]
+    pub version: Option<String>,
+    #[serde(rename = "fileSize")]
+    pub file_size: u32,
+    #[serde(rename = "metadata")]
+    pub metadata: Option<String>,
+    #[serde(rename = "summary")]
     pub summary: Option<String>,
-    #[serde(rename = "Detail")]
+    #[serde(rename = "detail")]
     pub detail: Option<String>,
-    #[serde(rename = "Retrieved")]
-    pub retrieved: bool,
-    #[serde(rename = "Applied")]
-    pub applied: bool,
-    #[serde(rename = "DownloadHash")]
-    pub download_hash: String
+    #[serde(rename = "updateType")]
+    pub update_type: Option<i32>,
+    pub retrieved: Option<bool>,
+    pub applied: Option<bool>,    
 }
 
 impl UpdateDescriptor {
@@ -35,14 +35,15 @@ impl UpdateDescriptor {
             mpak_download_url: "http://foo.bar".to_string(),
             target_devices: None, 
             published_on: "1/1/1980".to_string(), 
-            update_type: 1, 
-            version: "0.999".to_string(), 
-            download_size: 1234, 
+            update_type: Some(1), 
+            version: Some("0.999".to_string()), 
+            file_size: 1234, 
             summary: None, 
             detail: None, 
-            retrieved: false, 
-            applied: false, 
-            download_hash: "".to_string() 
+            crc: "".to_string(),
+            metadata: None,
+            retrieved: None,
+            applied: None
         }
     }
 
