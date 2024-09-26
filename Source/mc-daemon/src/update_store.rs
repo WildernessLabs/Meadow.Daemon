@@ -368,9 +368,23 @@ impl UpdateStore {
                     sanitized_url.insert_str(0, "http://");
 
                 }
+                
+                let client = reqwest::Client::new();
 
-                match reqwest::get(&sanitized_url).await {
+                match client
+                    .get(sanitized_url)
+                    .header(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(&format!("Bearer {}", jwt)).unwrap())
+                    .send()
+                    .await 
+                {            
                     Ok(response) => {
+                        
+                        // Check for a successful status code
+                        if !response.status().is_success() {
+                            println!("Failed to download file: HTTP {}", response.status());
+                            return Err(format!("Failed to download file: HTTP {}", response.status()));
+                        }                        
+                        
                         // determine where to store the mpak - we will extract on apply
                         let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
 
