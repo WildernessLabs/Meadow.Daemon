@@ -29,7 +29,8 @@ struct MeadowCloudLoginRequestMessage {
 pub struct UpdateStore {
     _settings: CloudSettings,
     store_directory: PathBuf,
-    updates: HashMap<String, Arc<Mutex<UpdateDescriptor>>>
+    updates: HashMap<String, Arc<Mutex<UpdateDescriptor>>>,
+    jwt: String
 }
 
 impl UpdateStore {
@@ -40,7 +41,8 @@ impl UpdateStore {
         let mut store = UpdateStore {
             _settings : settings,
             store_directory: PathBuf::from(Self::STORE_ROOT_FOLDER),
-            updates: HashMap::new()
+            updates: HashMap::new(),
+            jwt: String::new()
         };
         
         println!("Update data will be stored in '{:?}'", store.store_directory);
@@ -354,6 +356,10 @@ impl UpdateStore {
         }
     }
 
+    pub fn set_jwt(&mut self, jwt: String) {
+        self.jwt = jwt;
+    }
+
     pub async fn retrieve_update(&self, id: &String) -> Result<u64, String> {
         
         // is this an update we know about?
@@ -373,7 +379,7 @@ impl UpdateStore {
 
                 match client
                     .get(sanitized_url)
-                    .header(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(&format!("Bearer {}", jwt)).unwrap())
+                    .header(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.jwt)).unwrap())
                     .send()
                     .await 
                 {            
@@ -389,8 +395,10 @@ impl UpdateStore {
                         let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
 
                         // download the update
-                        println!("downloading {} to {}", sanitized_url, file_name);
-                        
+                        //let s = sanitized_url.clone();
+                        //println!("downloading {} to {}", s, file_name);
+                        println!("downloading {}", file_name);
+
                         let mut file = File::create(file_name).unwrap();
 
                         match response.bytes().await {

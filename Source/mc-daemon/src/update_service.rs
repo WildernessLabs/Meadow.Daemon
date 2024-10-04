@@ -195,6 +195,10 @@ impl UpdateService {
                                             // Convert decrypted bytes to a UTF-8 string
                                             self.jwt = String::from_utf8(decrypted_token_bytes).unwrap();
                                             self.oid = self._extract_oid_from_jwt(self.jwt.clone()).unwrap(); 
+                                            self.store
+                                                .lock()
+                                                .unwrap()
+                                                .set_jwt(self.jwt.clone());
 
                                             return true;        
                                         }

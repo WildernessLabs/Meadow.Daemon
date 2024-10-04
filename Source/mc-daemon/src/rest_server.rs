@@ -2,7 +2,7 @@ use std::{time::{SystemTime, UNIX_EPOCH}, sync::{Mutex, Arc}, fs::{self}, path::
 use actix_web::{App, Error, HttpResponse, HttpServer, web, Responder};
 use serde::{Deserialize, Serialize};
 
-use crate::{update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
+use crate::{crypto::Crypto, update_descriptor::UpdateDescriptor, update_service::UpdateService, update_store::UpdateStore};
 
 const PORT: &str = "5000";
 
