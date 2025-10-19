@@ -58,15 +58,26 @@ fn trim_newline(s: &mut String) {
 impl ServiceInfo {
     pub fn new() -> ServiceInfo {
 
-        let mut sn = fs::read_to_string("/var/lib/dbus/machine-id").unwrap().to_uppercase();
+        let mut sn = match fs::read_to_string("/var/lib/dbus/machine-id") {
+            Ok(id) => id.to_uppercase(),
+            Err(e) => {
+                eprintln!("WARNING: Failed to read machine-id: {}. Using 'UNKNOWN'.", e);
+                "UNKNOWN".to_string()
+            }
+        };
         trim_newline(&mut sn);
-        let info = uname::uname().unwrap();
+        let info = uname::uname().expect("CRITICAL: Failed to get system info via uname. This should never fail on a Linux system.");
 
         // todo: should this be in a separate service, maybe?
 
         ServiceInfo {
             service: "Wilderness Labs Meadow.Daemon".to_string(),
-            up_time: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            up_time: SystemTime::now().duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|e| {
+                    eprintln!("WARNING: Failed to get system time: {}. Using 0.", e);
+                    std::time::Duration::from_secs(0)
+                })
+                .as_secs(),
             version: "1.0".to_string(), // TODO: actually get this number
             status: "Running".to_string(),
             device_info: DeviceInfo 
@@ -79,7 +90,10 @@ impl ServiceInfo {
                 os_name: info.sysname,
                 machine: info.machine
             },
-            public_key: Crypto::get_public_key_pem()
+            public_key: Crypto::get_public_key_pem().unwrap_or_else(|e| {
+                eprintln!("WARNING: Failed to get public key: {}. Using placeholder.", e);
+                "[No Public Key]".to_string()
+            })
         }
     }
 }
@@ -115,12 +129,16 @@ impl RestServer {
 
         println!("REST CLEAR UPDATE STORE");
 
-        store
-            .lock()
-            .unwrap()
-            .clear();
-
-            Ok(HttpResponse::Ok().finish())
+        match store.lock() {
+            Ok(mut s) => {
+                s.clear();
+                Ok(HttpResponse::Ok().finish())
+            },
+            Err(e) => {
+                eprintln!("ERROR: Failed to lock store: {}", e);
+                Ok(HttpResponse::InternalServerError().body("Failed to lock store"))
+            }
+        }
     }
 
     async fn get_daemon_info() -> Result<HttpResponse, Error> {
@@ -137,19 +155,23 @@ impl RestServer {
         match data.action.as_str() {
             "download" => {
                 println!("Download MPAK for {}", id);
-                match store
-                    .lock()
-                    .unwrap()
-                    .retrieve_update(&id)
-                    .await {
-                        Ok(_result) => {
-                            HttpResponse::Ok().finish()
-                        },
-                        Err(msg) => {
-                            println!("Error sending MPAK for {}: {}", id, msg);                         
-                            HttpResponse::NotFound().body(msg) 
+                match store.lock() {
+                    Ok(s) => {
+                        match s.retrieve_update(&id).await {
+                            Ok(_result) => {
+                                HttpResponse::Ok().finish()
+                            },
+                            Err(msg) => {
+                                println!("Error sending MPAK for {}: {}", id, msg);
+                                HttpResponse::NotFound().body(msg)
+                            }
                         }
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Failed to lock store: {}", e);
+                        HttpResponse::InternalServerError().body("Failed to lock store")
                     }
+                }
             },
             "apply" => {
                 println!("Apply update {}", id);
@@ -177,16 +199,20 @@ impl RestServer {
 
                 if pid != 0 {
                     // note: this will launch a thread to wait and apply
-                    match store
-                        .lock()
-                        .unwrap()
-                        .apply_update(&id, &app_path, pid, &data.command)
-                        .await {
-                        Ok(_result) => {
-                            return HttpResponse::Ok().finish();
+                    match store.lock() {
+                        Ok(s) => {
+                            match s.apply_update(&id, &app_path, pid, &data.command).await {
+                                Ok(_result) => {
+                                    return HttpResponse::Ok().finish();
+                                },
+                                Err(msg) => {
+                                    return HttpResponse::NotFound().body(msg);
+                                }
+                            }
                         },
-                        Err(msg) => {
-                            return HttpResponse::NotFound().body(msg);
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to lock store: {}", e);
+                            return HttpResponse::InternalServerError().body("Failed to lock store");
                         }
                     }
                 }
@@ -194,21 +220,7 @@ impl RestServer {
                     // TODO: should we support non-pid apply calls?
                     let msg = format!("Caller did not provide a PID");
                     println!("{}", msg);
-                    return HttpResponse::BadRequest().body(msg) ;
-                    /*
-                    match store
-                        .lock()
-                        .unwrap()
-                        .extract_update(&id, "/home/ctacke/upd/".to_string())
-                        .await {
-                            Ok(_result) => {
-                                HttpResponse::Ok().finish()
-                            },
-                            Err(msg) => {
-                                HttpResponse::NotFound().body(msg) 
-                            }
-                        }
-                    */
+                    return HttpResponse::BadRequest().body(msg);
                 }
             },
             _ => {
@@ -219,28 +231,33 @@ impl RestServer {
     }
     
     async fn get_updates(
-        store: web::Data<Arc<Mutex<UpdateStore>>>) 
+        store: web::Data<Arc<Mutex<UpdateStore>>>)
         -> Result<HttpResponse, Error> { //actix_web::Result<impl Responder> {
 
         // open the store
-        let updates = store
-            .lock()
-            .unwrap()
-            .get_all_messages();
+        let updates = match store.lock() {
+            Ok(s) => s.get_all_messages(),
+            Err(e) => {
+                eprintln!("ERROR: Failed to lock store: {}", e);
+                return Ok(HttpResponse::InternalServerError().body("Failed to lock store"));
+            }
+        };
 
         let mut result: Vec<UpdateDescriptor> = Vec::with_capacity(updates.len());
 
         for i in 0..updates.len() {
-            result.push(updates[i]
-                .lock()
-                .unwrap()
-                .clone()
-            );
+            match updates[i].lock() {
+                Ok(update) => result.push(update.clone()),
+                Err(e) => {
+                    eprintln!("WARNING: Failed to lock update descriptor {}: {}", i, e);
+                    // Continue with other updates
+                }
+            }
         }
 
 
         // retrieve update info
-        println!("  sending {} results...", updates.len());
+        println!("  sending {} results...", result.len());
 
         Ok(HttpResponse::Ok().json(result))
     }

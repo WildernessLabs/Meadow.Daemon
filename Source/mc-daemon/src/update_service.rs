@@ -126,10 +126,13 @@ impl UpdateService {
     //#[tokio::main] // this doesn't make it 'main' it just makes it synchonous (thanks for clarity, tokio!)
     async fn _authenticate(&mut self) -> bool {
         // connect to the cloud and get a JWT
-        let device_id = fs::read_to_string("/var/lib/dbus/machine-id")
-            .unwrap()
-            .trim()
-            .to_ascii_uppercase();
+        let device_id = match fs::read_to_string("/var/lib/dbus/machine-id") {
+            Ok(id) => id.trim().to_ascii_uppercase(),
+            Err(e) => {
+                eprintln!("ERROR: Failed to read machine-id: {}", e);
+                return false;
+            }
+        };
 
         let client = Client::new();
         let endpoint = format!("{}/api/devices/login", self.settings.auth_server_address
@@ -155,21 +158,58 @@ impl UpdateService {
                             return false;
                         }
                         reqwest::StatusCode::OK => {
-                            let json = response.text().await.unwrap();
+                            let json = match response.text().await {
+                                Ok(text) => text,
+                                Err(e) => {
+                                    eprintln!("ERROR: Failed to read response text: {}", e);
+                                    return false;
+                                }
+                            };
 
                             let clr_result: Result<CloudLoginResponse, _> = serde_json::from_str(&json);
                             match clr_result {
                                 Ok(clr) => {
-                                    let encrypted_key_bytes = general_purpose::STANDARD.decode(clr.encrypted_key).unwrap();
-                                    let private_key_pem = Crypto::get_private_key_pem();
+                                    let encrypted_key_bytes = match general_purpose::STANDARD.decode(clr.encrypted_key) {
+                                        Ok(bytes) => bytes,
+                                        Err(e) => {
+                                            eprintln!("ERROR: Failed to decode encrypted key: {}", e);
+                                            return false;
+                                        }
+                                    };
+                                    let private_key_pem = match Crypto::get_private_key_pem() {
+                                        Ok(key) => key,
+                                        Err(e) => {
+                                            eprintln!("ERROR: Failed to get private key: {}", e);
+                                            eprintln!("Authentication cannot proceed without SSH keys.");
+                                            return false;
+                                        }
+                                    };
                                     let key_result = RsaPrivateKey::from_pkcs1_pem(&private_key_pem);
                                     match key_result {
                                         Ok(private_key) => {
-                                            let _decrypted_key = private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes).unwrap();
-                
+                                            let _decrypted_key = match private_key.decrypt(rsa::Pkcs1v15Encrypt, &encrypted_key_bytes) {
+                                                Ok(key) => key,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to decrypt RSA key: {}", e);
+                                                    return false;
+                                                }
+                                            };
+
                                             // Base64 decode the inputs
-                                            let encrypted_token_bytes = base64::decode(clr.encrypted_token).unwrap();
-                                            let iv_bytes = base64::decode(clr.iv).unwrap();
+                                            let encrypted_token_bytes = match base64::decode(clr.encrypted_token) {
+                                                Ok(bytes) => bytes,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to decode encrypted token: {}", e);
+                                                    return false;
+                                                }
+                                            };
+                                            let iv_bytes = match base64::decode(clr.iv) {
+                                                Ok(bytes) => bytes,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to decode IV: {}", e);
+                                                    return false;
+                                                }
+                                            };
 
 
                                             // Initialize the AES-256 CBC decryptor
@@ -190,15 +230,36 @@ impl UpdateService {
                                                 decrypted_buffer.extend_from_slice(&block);
                                             }
 
-                                            let decrypted_token_bytes = self._remove_pkcs7_padding(decrypted_buffer).unwrap();
+                                            let decrypted_token_bytes = match self._remove_pkcs7_padding(decrypted_buffer) {
+                                                Ok(bytes) => bytes,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to remove PKCS7 padding: {}", e);
+                                                    return false;
+                                                }
+                                            };
 
                                             // Convert decrypted bytes to a UTF-8 string
-                                            self.jwt = String::from_utf8(decrypted_token_bytes).unwrap();
-                                            self.oid = self._extract_oid_from_jwt(self.jwt.clone()).unwrap(); 
-                                            self.store
-                                                .lock()
-                                                .unwrap()
-                                                .set_jwt(self.jwt.clone());
+                                            self.jwt = match String::from_utf8(decrypted_token_bytes) {
+                                                Ok(s) => s,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to convert decrypted token to UTF-8: {}", e);
+                                                    return false;
+                                                }
+                                            };
+                                            self.oid = match self._extract_oid_from_jwt(self.jwt.clone()) {
+                                                Ok(oid) => oid,
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to extract OID from JWT: {}", e);
+                                                    return false;
+                                                }
+                                            };
+                                            match self.store.lock() {
+                                                Ok(mut store) => store.set_jwt(self.jwt.clone()),
+                                                Err(e) => {
+                                                    eprintln!("ERROR: Failed to lock store to set JWT: {}", e);
+                                                    return false;
+                                                }
+                                            };
 
                                             return true;        
                                         }
@@ -287,10 +348,14 @@ impl UpdateService {
                     // this spawns a cloud MQTT listener/subscriber.
                     // when it connects, it will update the state to connected
                     thread::spawn(move || {
-                        s
-                            .lock()
-                            .unwrap()
-                            .start(upd_snd, st_snd, jwt_copy, oid_copy);
+                        match s.lock() {
+                            Ok(mut subscriber) => {
+                                subscriber.start(upd_snd, st_snd, jwt_copy, oid_copy);
+                            },
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to lock subscriber: {}", e);
+                            }
+                        }
                     });
 
                     self.state = UpdateState::Connecting;
@@ -304,10 +369,14 @@ impl UpdateService {
                         Ok(d) => {
                             println!("{:?}", d);
 
-                            self.store
-                                .lock()
-                                .unwrap()
-                                .add(Arc::new(d));
+                            match self.store.lock() {
+                                Ok(mut store) => {
+                                    store.add(Arc::new(d));
+                                },
+                                Err(e) => {
+                                    eprintln!("ERROR: Failed to lock store to add update: {}", e);
+                                }
+                            }
                         },
                         _ => { /* no data */ }
                     }

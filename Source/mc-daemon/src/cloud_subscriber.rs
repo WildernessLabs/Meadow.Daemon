@@ -103,17 +103,19 @@ impl CloudSubscriber {
             .payload("Consumer lost connection")
             .finalize();
 
+        let mut ssl_builder = mqtt::SslOptionsBuilder::new();
+        if let Err(e) = ssl_builder.trust_store("/etc/ssl/ca-certificates.crt") {
+            println!("WARNING: Failed to set SSL trust store: {}. Using defaults.", e);
+        }
+        let ssl_options = ssl_builder.finalize();
+
         let conn_opts = mqtt::ConnectOptionsBuilder::new()
             .keep_alive_interval(Duration::from_secs(20))
             .clean_session(false)
             .will_message(lwt)
             .user_name(self.machine_id.clone())
             .password(jwt)
-            .ssl_options(mqtt::SslOptionsBuilder::new()
-                .trust_store("/etc/ssl/ca-certificates.crt")
-                .unwrap()
-                .finalize()                
-            )            
+            .ssl_options(ssl_options)
             .finalize();
 
         loop {
@@ -128,7 +130,9 @@ impl CloudSubscriber {
             }
         }
 
-        state_sender.send(UpdateState::Connected).unwrap();
+        if let Err(e) = state_sender.send(UpdateState::Connected) {
+            println!("ERROR: Failed to send Connected state: {}", e);
+        }
 
         // Subscribe to topics.
         self.subscribe_topics(&client, &self.settings.mqtt_topics);
@@ -141,11 +145,17 @@ impl CloudSubscriber {
                     println!("Received message: {:?}", msg);
                     // Process the message here
 
-                    let update = UpdateParser::parse_message(msg.payload_str().as_ref());
-
-                    // println!("{:?}", update);
-                    // pass the descriptor back to the update service
-                    sender.send(update).unwrap();
+                    match UpdateParser::parse_message(msg.payload_str().as_ref()) {
+                        Ok(update) => {
+                            // pass the descriptor back to the update service
+                            if let Err(e) = sender.send(update) {
+                                println!("ERROR: Failed to send update descriptor: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            println!("ERROR: Failed to parse update message: {}", e);
+                        }
+                    }
                 }
                 Ok(None) => {
                     println!("No message received, but client is still active.");
@@ -177,9 +187,11 @@ impl CloudSubscriber {
 
         // If still connected, then disconnect now.
         if client.is_connected() {
-            println!("Disconnecting");       
-            self.unsubscribe_topics(&client, &self.settings.mqtt_topics); 
-            client.disconnect(None).unwrap();
+            println!("Disconnecting");
+            self.unsubscribe_topics(&client, &self.settings.mqtt_topics);
+            if let Err(e) = client.disconnect(None) {
+                println!("ERROR: Failed to disconnect cleanly: {}", e);
+            }
         }
         println!("Exiting");
             

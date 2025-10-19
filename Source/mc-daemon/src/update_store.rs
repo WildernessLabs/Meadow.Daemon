@@ -51,16 +51,22 @@ impl UpdateStore {
         println!("Update data will be stored in '{:?}'", store.store_directory);
 
         if ! store.store_directory.exists() {
-            fs::create_dir_all(&store.store_directory).unwrap();
+            if let Err(e) = fs::create_dir_all(&store.store_directory) {
+                eprintln!("WARNING: Failed to create store directory: {}. Store may not function properly.", e);
+            }
         }
         else {
             // load all existing update descriptors
-            for entry in fs::read_dir(&store.store_directory).unwrap() {
-                match entry {
-                    Ok(e) => {
-                        if e.path().is_dir() {
-                            // it's a likely update folder, but look for (and parse) an info file to be sure
-                            for entry in fs::read_dir(e.path()).unwrap() {
+            match fs::read_dir(&store.store_directory) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(e) => {
+                                if e.path().is_dir() {
+                                    // it's a likely update folder, but look for (and parse) an info file to be sure
+                                    match fs::read_dir(e.path()) {
+                                        Ok(sub_entries) => {
+                                            for entry in sub_entries {
                                 match entry {
                                     Ok(f) => {
                                         let fp = f.path();
@@ -87,16 +93,26 @@ impl UpdateStore {
                                             }
                                         }
                                     },
-                                    Err(_e) => {
-                                        // TODO: ???
+                                    Err(e) => {
+                                        eprintln!("WARNING: Failed to read entry in update folder: {}", e);
                                     }
                                 }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            eprintln!("WARNING: Failed to read update subfolder: {}", e);
+                                        }
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("WARNING: Failed to read store entry: {}", e);
                             }
                         }
-                    },
-                    Err(_e) => {
-                        // TODO: ???
                     }
+                },
+                Err(e) => {
+                    eprintln!("ERROR: Failed to read store directory: {}", e);
                 }
             }
         }
@@ -124,36 +140,55 @@ impl UpdateStore {
     }
 
     pub fn remove_update(&mut self, mpak_id: String) {
-        for entry in fs::read_dir(self.store_directory.clone()).unwrap() {
-            match entry {
-                Ok(e) => {
-                    if e.file_name().into_string().unwrap() == mpak_id {
-                        if e.path().is_dir() {
-                            // it's a likely update folder, but look for (and parse) an info file to be sure
-                            for entry in fs::read_dir(e.path()).unwrap() {
+        match fs::read_dir(self.store_directory.clone()) {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(e) => {
+                            match e.file_name().into_string() {
+                                Ok(name) if name == mpak_id => {
+                                    if e.path().is_dir() {
+                                        // it's a likely update folder, but look for (and parse) an info file to be sure
+                                        match fs::read_dir(e.path()) {
+                                            Ok(sub_entries) => {
+                                                for entry in sub_entries {
                                 match entry {
                                     Ok(f) => {
                                         let fp = f.path();
                                         let file_name = fp.file_name().unwrap_or(OsStr::new(""));
                                         if fp.is_file() && file_name == Self::UPDATE_INFO_FILE_NAME {
-                                            fs::remove_dir_all(e.path()).unwrap();
+                                            if let Err(e) = fs::remove_dir_all(e.path()) {
+                                                eprintln!("ERROR: Failed to remove update directory: {}", e);
+                                            }
                                         }
                                     },
-                                    Err(_e) => {
-                                        // TODO: ???
+                                    Err(e) => {
+                                        eprintln!("WARNING: Failed to read entry: {}", e);
+                                    }
+                                }
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            eprintln!("WARNING: Failed to read update folder: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                                self.updates.remove(&mpak_id);
+                                                return;
+                                            },
+                                            _ => {} // Name doesn't match or conversion failed
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("WARNING: Failed to read directory entry: {}", e);
                                     }
                                 }
                             }
+                        },
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to read store directory for removal: {}", e);
                         }
-                        self.updates.remove(&mpak_id);
-                        return;
                     }
-                },
-                Err(_e) => {
-                    // TODO: ???
-                }
-            }
-        }
     }
 
     pub fn clear(&mut self) {
@@ -169,13 +204,31 @@ impl UpdateStore {
         println!("APPLYING UPDATE {}", id);
 
         let p = app_path.clone();
-        let update = self.updates.get(id).unwrap().clone();
+        let update = match self.updates.get(id) {
+            Some(u) => u.clone(),
+            None => {
+                let msg = format!("Update {} not found in store", id);
+                eprintln!("ERROR: {}", msg);
+                return Err(msg);
+            }
+        };
 
         // extract the update to a temp location
-        let d = update.lock().unwrap();
+        let d = match update.lock() {
+            Ok(descriptor) => descriptor,
+            Err(e) => {
+                let msg = format!("Failed to lock update descriptor: {}", e);
+                eprintln!("ERROR: {}", msg);
+                return Err(msg);
+            }
+        };
         let package_path = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
         let update_temp_path = format!("{}/{}/tmp", self.store_root_folder.display(), d.mpak_id);
-        self.extract_package_to_location(package_path, &update_temp_path).unwrap();
+        if let Err(e) = self.extract_package_to_location(package_path, &update_temp_path) {
+            let msg = format!("Failed to extract package: {}", e);
+            eprintln!("ERROR: {}", msg);
+            return Err(msg);
+        }
 
         // make sure it's a valid app update (i.e. has an `app` folder)
         let update_source_folder = Path::new(&update_temp_path).join("app");
@@ -192,8 +245,20 @@ impl UpdateStore {
         let store_root = self.store_root_folder.clone();
 
         thread::spawn(move || {
-            let application_folder = p.parent().unwrap().to_str().unwrap();
-            let app = p.file_name().unwrap().to_str().unwrap();
+            let application_folder = match p.parent().and_then(|p| p.to_str()) {
+                Some(folder) => folder,
+                None => {
+                    eprintln!("ERROR: Failed to get application folder from path");
+                    return;
+                }
+            };
+            let app = match p.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => {
+                    eprintln!("ERROR: Failed to get application name from path");
+                    return;
+                }
+            };
             let proc_folder = format!("/proc/{}", pid);
             let proc_path = Path::new(&proc_folder);
 
@@ -287,23 +352,30 @@ impl UpdateStore {
     fn _extract_update_to_location(_update: Arc<Mutex<UpdateDescriptor>>, file_name: String, destination_root: &String) -> Result<u64, String> {
 //            let mut d = update.lock().unwrap();
 
-            let zip_file = File::open(file_name).unwrap();
-            let mut archive = ZipArchive::new(zip_file).unwrap();
-        
+            let zip_file = File::open(&file_name)
+                .map_err(|e| format!("Failed to open zip file '{}': {}", file_name, e))?;
+            let mut archive = ZipArchive::new(zip_file)
+                .map_err(|e| format!("Failed to read zip archive: {}", e))?;
+
             for i in 0..archive.len() {
-                let mut file = archive.by_index(i).unwrap();
+                let mut file = archive.by_index(i)
+                    .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
                 let outpath = Path::new(&destination_root).join(file.name());
                 if (&*file.name()).ends_with('/') {
-                    std::fs::create_dir_all(&outpath).unwrap();
-                } 
+                    std::fs::create_dir_all(&outpath)
+                        .map_err(|e| format!("Failed to create directory '{}': {}", outpath.display(), e))?;
+                }
                 else {
                     if let Some(p) = outpath.parent() {
                         if !p.exists() {
-                            std::fs::create_dir_all(&p).unwrap();
+                            std::fs::create_dir_all(&p)
+                                .map_err(|e| format!("Failed to create parent directory '{}': {}", p.display(), e))?;
                         }
                     }
-                    let mut outfile = File::create(&outpath).unwrap();
-                    std::io::copy(&mut file, &mut outfile).unwrap();
+                    let mut outfile = File::create(&outpath)
+                        .map_err(|e| format!("Failed to create output file '{}': {}", outpath.display(), e))?;
+                    std::io::copy(&mut file, &mut outfile)
+                        .map_err(|e| format!("Failed to write to file '{}': {}", outpath.display(), e))?;
                 }
             };
 
@@ -319,23 +391,30 @@ impl UpdateStore {
     }
 
     fn extract_package_to_location(&self, package_path: String, destination_root: &String) -> Result<u64, String> {
-        let zip_file = File::open(package_path).unwrap();
-        let mut archive = ZipArchive::new(zip_file).unwrap();
-    
+        let zip_file = File::open(&package_path)
+            .map_err(|e| format!("Failed to open package '{}': {}", package_path, e))?;
+        let mut archive = ZipArchive::new(zip_file)
+            .map_err(|e| format!("Failed to read package archive: {}", e))?;
+
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i).unwrap();
+            let mut file = archive.by_index(i)
+                .map_err(|e| format!("Failed to read archive entry {}: {}", i, e))?;
             let outpath = Path::new(&destination_root).join(file.name());
             if (&*file.name()).ends_with('/') {
-                std::fs::create_dir_all(&outpath).unwrap();
-            } 
+                std::fs::create_dir_all(&outpath)
+                    .map_err(|e| format!("Failed to create directory '{}': {}", outpath.display(), e))?;
+            }
             else {
                 if let Some(p) = outpath.parent() {
                     if !p.exists() {
-                        std::fs::create_dir_all(&p).unwrap();
+                        std::fs::create_dir_all(&p)
+                            .map_err(|e| format!("Failed to create parent directory '{}': {}", p.display(), e))?;
                     }
                 }
-                let mut outfile = File::create(&outpath).unwrap();
-                std::io::copy(&mut file, &mut outfile).unwrap();
+                let mut outfile = File::create(&outpath)
+                    .map_err(|e| format!("Failed to create file '{}': {}", outpath.display(), e))?;
+                std::io::copy(&mut file, &mut outfile)
+                    .map_err(|e| format!("Failed to copy file data to '{}': {}", outpath.display(), e))?;
             }
         }
 
@@ -346,27 +425,39 @@ impl UpdateStore {
         let update = self.updates.get(id);
         match update {
             Some(u) => {
-                let mut d = u.lock().unwrap();
+                let mut d = match u.lock() {
+                    Ok(descriptor) => descriptor,
+                    Err(e) => {
+                        return Err(format!("Failed to lock update descriptor: {}", e));
+                    }
+                };
 
                 let file_name = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
 
-                let zip_file = File::open(file_name).unwrap();
-                let mut archive = ZipArchive::new(zip_file).unwrap();
-            
+                let zip_file = File::open(&file_name)
+                    .map_err(|e| format!("Failed to open update package '{}': {}", file_name, e))?;
+                let mut archive = ZipArchive::new(zip_file)
+                    .map_err(|e| format!("Failed to read archive: {}", e))?;
+
                 for i in 0..archive.len() {
-                    let mut file = archive.by_index(i).unwrap();
+                    let mut file = archive.by_index(i)
+                        .map_err(|e| format!("Failed to read archive entry {}: {}", i, e))?;
                     let outpath = Path::new(&destination_root).join(file.name());
                     if (&*file.name()).ends_with('/') {
-                        std::fs::create_dir_all(&outpath).unwrap();
-                    } 
+                        std::fs::create_dir_all(&outpath)
+                            .map_err(|e| format!("Failed to create directory '{}': {}", outpath.display(), e))?;
+                    }
                     else {
                         if let Some(p) = outpath.parent() {
                             if !p.exists() {
-                                std::fs::create_dir_all(&p).unwrap();
+                                std::fs::create_dir_all(&p)
+                                    .map_err(|e| format!("Failed to create parent directory '{}': {}", p.display(), e))?;
                             }
                         }
-                        let mut outfile = File::create(&outpath).unwrap();
-                        std::io::copy(&mut file, &mut outfile).unwrap();
+                        let mut outfile = File::create(&outpath)
+                            .map_err(|e| format!("Failed to create output file '{}': {}", outpath.display(), e))?;
+                        std::io::copy(&mut file, &mut outfile)
+                            .map_err(|e| format!("Failed to copy file to '{}': {}", outpath.display(), e))?;
                     }
                 }
             
@@ -396,7 +487,12 @@ impl UpdateStore {
         let update = self.updates.get(id);
         match update {
             Some(u) => {
-               let mut d = u.lock().unwrap();
+               let mut d = match u.lock() {
+                   Ok(descriptor) => descriptor,
+                   Err(e) => {
+                       return Err(format!("Failed to lock update descriptor: {}", e));
+                   }
+               };
 
                 let mut sanitized_url = (&d.mpak_download_url).to_string();
                 if !sanitized_url.starts_with("http") {
@@ -404,12 +500,19 @@ impl UpdateStore {
                     sanitized_url.insert_str(0, "http://");
 
                 }
-                
+
                 let client = reqwest::Client::new();
+
+                let auth_header = match reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.jwt)) {
+                    Ok(header) => header,
+                    Err(e) => {
+                        return Err(format!("Failed to create auth header: {}", e));
+                    }
+                };
 
                 match client
                     .get(sanitized_url)
-                    .header(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.jwt)).unwrap())
+                    .header(reqwest::header::AUTHORIZATION, auth_header)
                     .send()
                     .await 
                 {            
@@ -429,12 +532,22 @@ impl UpdateStore {
                         //println!("downloading {} to {}", s, file_name);
                         println!("downloading {}", file_name);
 
-                        let mut file = File::create(file_name).unwrap();
+                        let mut file = match File::create(&file_name) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                return Err(format!("Failed to create file '{}': {}", file_name, e));
+                            }
+                        };
 
                         match response.bytes().await {
                             Ok(data) => {
                                 let mut content = Cursor::new(data);
-                                let size = copy(&mut content, &mut file).unwrap();
+                                let size = match copy(&mut content, &mut file) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        return Err(format!("Failed to write downloaded data to file: {}", e));
+                                    }
+                                };
                 
                                 // set the update as retrieved
                                 d.retrieved = Some(true);
@@ -469,24 +582,40 @@ impl UpdateStore {
         // make sure subdir exists
         let mut path = self.store_root_folder.join(&descriptor.mpak_id);
         if ! path.exists() {
-            fs::create_dir(&path).unwrap();
+            if let Err(e) = fs::create_dir(&path) {
+                eprintln!("ERROR: Failed to create update directory '{}': {}", path.display(), e);
+                return;
+            }
         }
 
         // serialize
-        let json = serde_json::to_string_pretty(&descriptor).unwrap();
+        let json = match serde_json::to_string_pretty(&descriptor) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("ERROR: Failed to serialize descriptor: {}", e);
+                return;
+            }
+        };
 
         // erase any existing file
         path.push(&Self::UPDATE_INFO_FILE_NAME);
 
-        let mut file = OpenOptions::new()
+        let mut file = match OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(path)
-            .unwrap();
+            .open(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("ERROR: Failed to open file '{}': {}", path.display(), e);
+                    return;
+                }
+            };
 
         // save
-        file.write_all(json.as_bytes()).unwrap();
+        if let Err(e) = file.write_all(json.as_bytes()) {
+            eprintln!("ERROR: Failed to write to file '{}': {}", path.display(), e);
+        }
 
     }
 
@@ -508,14 +637,28 @@ impl UpdateStore {
                         descriptor.applied = Some(true);
 
                         // Write back to file
-                        let json = serde_json::to_string_pretty(&descriptor).unwrap();
-                        let mut file = OpenOptions::new()
+                        let json = match serde_json::to_string_pretty(&descriptor) {
+                            Ok(j) => j,
+                            Err(e) => {
+                                println!("ERROR: Failed to serialize descriptor for {}: {:?}", update_id, e);
+                                return;
+                            }
+                        };
+                        let mut file = match OpenOptions::new()
                             .write(true)
                             .create(true)
                             .truncate(true)
-                            .open(&info_path)
-                            .unwrap();
-                        file.write_all(json.as_bytes()).unwrap();
+                            .open(&info_path) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    println!("ERROR: Failed to open descriptor file for {}: {:?}", update_id, e);
+                                    return;
+                                }
+                            };
+                        if let Err(e) = file.write_all(json.as_bytes()) {
+                            println!("ERROR: Failed to write descriptor for {}: {:?}", update_id, e);
+                            return;
+                        }
 
                         println!("Marked update {} as applied", update_id);
                     }

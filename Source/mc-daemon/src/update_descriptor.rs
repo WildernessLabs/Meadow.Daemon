@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use anyhow::{Context, Result};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateDescriptor {
@@ -47,8 +48,10 @@ impl UpdateDescriptor {
         }
     }
 
-    pub fn from_json(json: &str) -> UpdateDescriptor {
-        let ud: UpdateDescriptor = serde_json::from_str(json).unwrap();
-        ud
+    pub fn from_json(json: &str) -> Result<UpdateDescriptor> {
+        let ud: UpdateDescriptor = serde_json::from_str(json)
+            .with_context(|| format!("Failed to parse UpdateDescriptor from JSON: {}",
+                if json.len() > 100 { &json[..100] } else { json }))?;
+        Ok(ud)
     }
 }
