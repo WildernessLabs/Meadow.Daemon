@@ -1,5 +1,6 @@
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
 
 #[derive(Clone)]
 pub struct CloudSettings {
@@ -32,6 +33,19 @@ impl CloudSettings {
     }
 
     pub fn from_file(path: &str) -> CloudSettings {
+        match Self::try_from_file(path) {
+            Ok(settings) => settings,
+            Err(e) => {
+                println!("ERROR loading config from '{}': {}", path, e);
+                println!("Using default settings");
+                let mut settings = Self::default();
+                Self::apply_env_overrides(&mut settings);
+                settings
+            }
+        }
+    }
+
+    fn try_from_file(path: &str) -> Result<CloudSettings> {
         // set up defaults
         let mut settings = CloudSettings::default();
 
@@ -39,10 +53,11 @@ impl CloudSettings {
             println!("WARNING: Config file '{}' does not exist", path);
             // Still apply environment variable overrides even if config file doesn't exist
             Self::apply_env_overrides(&mut settings);
-            return settings;
+            return Ok(settings);
         }
 
-        let lines = CloudSettings::read_lines(path);
+        let lines = Self::read_lines(path)
+            .with_context(|| format!("Failed to read config file: {}", path))?;
 
         for line in lines {
 
@@ -50,13 +65,19 @@ impl CloudSettings {
                 .chars()
                 .take_while(|&ch| ch != '#')
                 .collect::<String>();
-            
+
             if s.len() > 0 {
-                let key = &s[..s.find(' ').unwrap()]
-                    .to_lowercase();
-                let val = &s[s.find(' ').unwrap()..]
-                    .trim()
-                    .to_string();
+                // Find the space separator
+                let space_pos = match s.find(' ') {
+                    Some(pos) => pos,
+                    None => {
+                        println!("WARNING: Skipping malformed config line (no space): '{}'", s);
+                        continue;
+                    }
+                };
+
+                let key = &s[..space_pos].to_lowercase();
+                let val = &s[space_pos..].trim().to_string();
 
                 match key.as_str() {
                     "enabled" =>
@@ -73,7 +94,11 @@ impl CloudSettings {
                     },
                     "update_server_port" =>
                     {
-                        settings.update_server_port = val.parse::<i32>().unwrap();
+                        settings.update_server_port = val.parse::<i32>()
+                            .unwrap_or_else(|e| {
+                                println!("WARNING: Invalid port '{}': {}. Using default.", val, e);
+                                CloudSettings::default().update_server_port
+                            });
                     },
                     "use_authentication" =>
                     {
@@ -85,7 +110,11 @@ impl CloudSettings {
                     },
                     "auth_server_port" =>
                     {
-                        settings.auth_server_port = Some(val.parse::<i32>().unwrap());
+                        settings.auth_server_port = Some(val.parse::<i32>()
+                            .unwrap_or_else(|e| {
+                                println!("WARNING: Invalid auth port '{}': {}. Using default.", val, e);
+                                443
+                            }));
                     },
                     "mqtt_topics" =>
                     {
@@ -93,11 +122,19 @@ impl CloudSettings {
                     },
                     "connect_retry_seconds" =>
                     {
-                        settings.connect_retry_seconds = val.parse::<u64>().unwrap();
+                        settings.connect_retry_seconds = val.parse::<u64>()
+                            .unwrap_or_else(|e| {
+                                println!("WARNING: Invalid retry seconds '{}': {}. Using default.", val, e);
+                                CloudSettings::default().connect_retry_seconds
+                            });
                     },
                     "update_apply_timeout_seconds" =>
                     {
-                        settings.update_apply_timeout_seconds = val.parse::<u64>().unwrap();
+                        settings.update_apply_timeout_seconds = val.parse::<u64>()
+                            .unwrap_or_else(|e| {
+                                println!("WARNING: Invalid timeout '{}': {}. Using default.", val, e);
+                                CloudSettings::default().update_apply_timeout_seconds
+                            });
                     },
                     _ =>
                     {
@@ -112,7 +149,7 @@ impl CloudSettings {
         // Apply environment variable overrides
         Self::apply_env_overrides(&mut settings);
 
-        settings
+        Ok(settings)
     }
 
     fn apply_env_overrides(settings: &mut CloudSettings) {
@@ -123,11 +160,13 @@ impl CloudSettings {
         }
     }
 
-    fn read_lines(filename: &str) -> Vec<String> {
-        read_to_string(filename) 
-            .unwrap()  // panic on possible file-reading errors
-            .lines()  // split the string into an iterator of string slices
-            .map(String::from)  // make each slice into a string
-            .collect()  // gather them together into a vector
+    fn read_lines(filename: &str) -> Result<Vec<String>> {
+        let contents = read_to_string(filename)
+            .with_context(|| format!("Failed to read file: {}", filename))?;
+
+        Ok(contents
+            .lines()
+            .map(String::from)
+            .collect())
     }
 }
