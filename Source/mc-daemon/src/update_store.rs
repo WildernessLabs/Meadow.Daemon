@@ -28,19 +28,22 @@ struct MeadowCloudLoginRequestMessage {
 
 pub struct UpdateStore {
     _settings: CloudSettings,
+    store_root_folder: PathBuf,
     store_directory: PathBuf,
     updates: HashMap<String, Arc<Mutex<UpdateDescriptor>>>,
     jwt: String
 }
 
 impl UpdateStore {
-    pub const STORE_ROOT_FOLDER: &'static str = "/home/ctacke/meadow/updates";
     const UPDATE_INFO_FILE_NAME: &'static str = "info.json";
 
     pub fn new(settings: CloudSettings) -> UpdateStore {
+        let store_root = settings.meadow_root.join("updates");
+
         let mut store = UpdateStore {
             _settings : settings,
-            store_directory: PathBuf::from(Self::STORE_ROOT_FOLDER),
+            store_root_folder: store_root.clone(),
+            store_directory: store_root,
             updates: HashMap::new(),
             jwt: String::new()
         };
@@ -170,8 +173,8 @@ impl UpdateStore {
 
         // extract the update to a temp location
         let d = update.lock().unwrap();
-        let package_path = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
-        let update_temp_path = format!("{}/{}/tmp", Self::STORE_ROOT_FOLDER, d.mpak_id);
+        let package_path = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
+        let update_temp_path = format!("{}/{}/tmp", self.store_root_folder.display(), d.mpak_id);
         self.extract_package_to_location(package_path, &update_temp_path).unwrap();
 
         // make sure it's a valid app update (i.e. has an `app` folder)
@@ -318,7 +321,7 @@ impl UpdateStore {
             Some(u) => {
                 let mut d = u.lock().unwrap();
 
-                let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
+                let file_name = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
 
                 let zip_file = File::open(file_name).unwrap();
                 let mut archive = ZipArchive::new(zip_file).unwrap();
@@ -390,9 +393,9 @@ impl UpdateStore {
                             println!("Failed to download file: HTTP {}", response.status());
                             return Err(format!("Failed to download file: HTTP {}", response.status()));
                         }                        
-                        
+
                         // determine where to store the mpak - we will extract on apply
-                        let file_name = format!("{}/{}/update.mpak", Self::STORE_ROOT_FOLDER, d.mpak_id);
+                        let file_name = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
 
                         // download the update
                         //let s = sanitized_url.clone();
@@ -437,7 +440,7 @@ impl UpdateStore {
         println!("{:?}", descriptor);
 
         // make sure subdir exists
-        let mut path = Path::new(Self::STORE_ROOT_FOLDER).join(&descriptor.mpak_id);
+        let mut path = self.store_root_folder.join(&descriptor.mpak_id);
         if ! path.exists() {
             fs::create_dir(&path).unwrap();
         }
