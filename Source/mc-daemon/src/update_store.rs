@@ -188,6 +188,8 @@ impl UpdateStore {
         let local_command = command.clone();
         let timeout_seconds = self._settings.update_apply_timeout_seconds;
         let temp_path = update_temp_path.clone();
+        let update_id = id.clone();
+        let store_root = self.store_root_folder.clone();
 
         thread::spawn(move || {
             let application_folder = p.parent().unwrap().to_str().unwrap();
@@ -244,7 +246,8 @@ impl UpdateStore {
                             application_folder,
                             &opts) {
                                 Ok(_) => {
-                                    // todo: update the descriptor to "applied"
+                                    // Mark update as "applied" in descriptor
+                                    Self::mark_update_applied(&update_id, &store_root);
 
                                     // Clean up temp extraction folder
                                     println!("Cleaning up temp extraction folder: {}", temp_path);
@@ -485,5 +488,45 @@ impl UpdateStore {
         // save
         file.write_all(json.as_bytes()).unwrap();
 
+    }
+
+    fn mark_update_applied(update_id: &String, store_root: &PathBuf) {
+        let info_path = store_root.join(update_id).join(Self::UPDATE_INFO_FILE_NAME);
+
+        if !info_path.exists() {
+            println!("WARNING: Cannot mark update {} as applied - info file not found", update_id);
+            return;
+        }
+
+        // Read the existing descriptor
+        match File::open(&info_path) {
+            Ok(file) => {
+                let reader = BufReader::new(file);
+                match serde_json::from_reader::<_, UpdateDescriptor>(reader) {
+                    Ok(mut descriptor) => {
+                        // Mark as applied
+                        descriptor.applied = Some(true);
+
+                        // Write back to file
+                        let json = serde_json::to_string_pretty(&descriptor).unwrap();
+                        let mut file = OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&info_path)
+                            .unwrap();
+                        file.write_all(json.as_bytes()).unwrap();
+
+                        println!("Marked update {} as applied", update_id);
+                    }
+                    Err(err) => {
+                        println!("ERROR: Failed to parse descriptor for {}: {:?}", update_id, err);
+                    }
+                }
+            }
+            Err(err) => {
+                println!("ERROR: Failed to open descriptor file for {}: {:?}", update_id, err);
+            }
+        }
     }
 }
