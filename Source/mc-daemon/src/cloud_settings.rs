@@ -1,9 +1,10 @@
 use std::fs::read_to_string;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
 pub struct CloudSettings {
     pub enabled: bool,
+    pub meadow_root: PathBuf,
     pub update_server_address: String,
     pub update_server_port: i32,
     pub use_authentication: bool,
@@ -17,6 +18,7 @@ impl CloudSettings {
     pub fn default() -> CloudSettings {
         CloudSettings{
             enabled: true,
+            meadow_root: PathBuf::from("/opt/meadow"),
             update_server_address: "".to_string(),
             update_server_port: 883,
             use_authentication: true,
@@ -53,9 +55,13 @@ impl CloudSettings {
                     .to_string();
 
                 match key.as_str() {
-                    "enabled" => 
+                    "enabled" =>
                     {
                         settings.enabled = val.to_lowercase() == "yes";
+                    },
+                    "meadow_root" =>
+                    {
+                        settings.meadow_root = PathBuf::from(val);
                     },
                     "update_server_address" =>
                     {
@@ -85,7 +91,7 @@ impl CloudSettings {
                     {
                         settings.connect_retry_seconds = val.parse::<u64>().unwrap();
                     },
-                    _ => 
+                    _ =>
                     {
                         println!("WARNING: unknown setting '{}'", s);
                         // unknown setting
