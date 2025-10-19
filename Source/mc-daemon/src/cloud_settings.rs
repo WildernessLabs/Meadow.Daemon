@@ -35,6 +35,8 @@ impl CloudSettings {
 
         if !Path::new(path).exists() {
             println!("WARNING: Config file '{}' does not exist", path);
+            // Still apply environment variable overrides even if config file doesn't exist
+            Self::apply_env_overrides(&mut settings);
             return settings;
         }
 
@@ -101,8 +103,18 @@ impl CloudSettings {
             }
         }
 
+        // Apply environment variable overrides
+        Self::apply_env_overrides(&mut settings);
 
         settings
+    }
+
+    fn apply_env_overrides(settings: &mut CloudSettings) {
+        // Check for MEADOW_ROOT environment variable
+        if let Ok(meadow_root) = std::env::var("MEADOW_ROOT") {
+            println!("Using MEADOW_ROOT from environment: {}", meadow_root);
+            settings.meadow_root = PathBuf::from(meadow_root);
+        }
     }
 
     fn read_lines(filename: &str) -> Vec<String> {

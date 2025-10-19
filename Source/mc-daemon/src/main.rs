@@ -5,8 +5,15 @@ use mc_daemon::{cloud_settings::CloudSettings, update_service::UpdateService, re
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("starting daemon");
 
-    let settings = CloudSettings::from_file("/etc/meadow.conf");    
+    let settings = CloudSettings::from_file("/etc/meadow.conf");
     let machine_id = read_to_string("/etc/machine-id").unwrap();
+
+    // Ensure meadow_root directory exists
+    if !settings.meadow_root.exists() {
+        println!("Creating meadow root directory: {:?}", settings.meadow_root);
+        std::fs::create_dir_all(&settings.meadow_root).unwrap();
+    }
+
     let update_store: Arc<Mutex<UpdateStore>> = Arc::new(Mutex::new(UpdateStore::new(settings.clone())));
 
     let mut update_service = UpdateService::new(settings, machine_id.clone(), update_store.clone());
