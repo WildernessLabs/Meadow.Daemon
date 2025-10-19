@@ -186,6 +186,8 @@ impl UpdateStore {
 
         // spawn a thread to wait for app shutdown
         let local_command = command.clone();
+        let timeout_seconds = self._settings.update_apply_timeout_seconds;
+        let temp_path = update_temp_path.clone();
 
         thread::spawn(move || {
             let application_folder = p.parent().unwrap().to_str().unwrap();
@@ -194,21 +196,39 @@ impl UpdateStore {
             let proc_path = Path::new(&proc_folder);
 
             println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
+            println!("Waiting for process to exit (timeout: {} seconds)", timeout_seconds);
+
+            let start_time = std::time::Instant::now();
+            let mut last_warning = 0u64;
 
             loop {
                 // dev note: there's probably a better way to do this, but I can't find it
                 // wait::waitpid only works for child processes
 
+                let elapsed_secs = start_time.elapsed().as_secs();
+
+                // Check for timeout
+                if elapsed_secs >= timeout_seconds {
+                    println!("ERROR: Timeout waiting for '{}' to exit after {} seconds", app, timeout_seconds);
+                    println!("Cleaning up temp extraction folder: {}", temp_path);
+                    let _ = fs::remove_dir_all(&temp_path);
+                    // TODO: Mark update as "failed" in descriptor
+                    return;
+                }
+
+                // Log warnings at milestone intervals (1 min, 2 min, 3 min, 4 min)
+                let current_minute = elapsed_secs / 60;
+                if current_minute > last_warning && current_minute > 0 {
+                    println!("WARNING: Still waiting for '{}' to exit ({} minutes elapsed)", app, current_minute);
+                    last_warning = current_minute;
+                }
+
                 match proc_path.is_dir() {
                     true => {
-                        println!("'{}' is still alive", app);
-
-                        // todo: put in a timeout escape hatch here
-
                         sleep(Duration::from_millis(1000));
                     },
                     _ => {
-                        println!("'{}' exited", &app);
+                        println!("'{}' exited after {} seconds", &app, start_time.elapsed().as_secs());
 
                         // todo: copy existing app binaries to a rollback folder
 
@@ -225,6 +245,10 @@ impl UpdateStore {
                             &opts) {
                                 Ok(_) => {
                                     // todo: update the descriptor to "applied"
+
+                                    // Clean up temp extraction folder
+                                    println!("Cleaning up temp extraction folder: {}", temp_path);
+                                    let _ = fs::remove_dir_all(&temp_path);
 
                                     // restart the app
                                     println!("Launching '{:?}'...", p);

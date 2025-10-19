@@ -11,7 +11,8 @@ pub struct CloudSettings {
     pub auth_server_address: Option<String>,
     pub auth_server_port: Option<i32>,
     pub mqtt_topics: Vec<String>,
-    pub connect_retry_seconds: u64
+    pub connect_retry_seconds: u64,
+    pub update_apply_timeout_seconds: u64
 }
 
 impl CloudSettings {
@@ -25,7 +26,8 @@ impl CloudSettings {
             auth_server_address: Some("https://www.meadowcloud.co".to_string()),
             auth_server_port: None,
             mqtt_topics: vec!["{OID}/ota/{ID}".to_string()],
-            connect_retry_seconds: 15
+            connect_retry_seconds: 15,
+            update_apply_timeout_seconds: 300  // 5 minutes
         }
     }
 
@@ -92,6 +94,10 @@ impl CloudSettings {
                     "connect_retry_seconds" =>
                     {
                         settings.connect_retry_seconds = val.parse::<u64>().unwrap();
+                    },
+                    "update_apply_timeout_seconds" =>
+                    {
+                        settings.update_apply_timeout_seconds = val.parse::<u64>().unwrap();
                     },
                     _ =>
                     {
