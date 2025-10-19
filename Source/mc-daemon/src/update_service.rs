@@ -3,9 +3,8 @@ use serde_json::{json, Value};
 use serde::{Deserialize, Serialize};
 use tokio::time;
 use reqwest::Client;
-use base64;
 use base64::engine::general_purpose;
-use base64::{Engine, DecodeError};
+use base64::Engine;
 use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
 use std::time::Duration;
 use cbc::cipher::{KeyIvInit, BlockDecryptMut, generic_array::GenericArray, typenum::U16};
@@ -86,7 +85,7 @@ impl UpdateService {
         let payload = parts[1];
         
         // Decode the base64 payload
-        let decoded = base64::decode(payload)?;
+        let decoded = general_purpose::STANDARD.decode(payload)?;
         
         // Convert the decoded bytes to a String
         let decoded_str = String::from_utf8(decoded)?;
@@ -196,14 +195,14 @@ impl UpdateService {
                                             };
 
                                             // Base64 decode the inputs
-                                            let encrypted_token_bytes = match base64::decode(clr.encrypted_token) {
+                                            let encrypted_token_bytes = match general_purpose::STANDARD.decode(clr.encrypted_token) {
                                                 Ok(bytes) => bytes,
                                                 Err(e) => {
                                                     eprintln!("ERROR: Failed to decode encrypted token: {}", e);
                                                     return false;
                                                 }
                                             };
-                                            let iv_bytes = match base64::decode(clr.iv) {
+                                            let iv_bytes = match general_purpose::STANDARD.decode(clr.iv) {
                                                 Ok(bytes) => bytes,
                                                 Err(e) => {
                                                     eprintln!("ERROR: Failed to decode IV: {}", e);
