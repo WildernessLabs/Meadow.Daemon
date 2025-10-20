@@ -13,7 +13,8 @@ pub struct CloudSettings {
     pub auth_server_port: Option<i32>,
     pub mqtt_topics: Vec<String>,
     pub connect_retry_seconds: u64,
-    pub update_apply_timeout_seconds: u64
+    pub update_apply_timeout_seconds: u64,
+    pub auth_max_retries: u32
 }
 
 impl CloudSettings {
@@ -28,7 +29,8 @@ impl CloudSettings {
             auth_server_port: None,
             mqtt_topics: vec!["{OID}/ota/{ID}".to_string()],
             connect_retry_seconds: 15,
-            update_apply_timeout_seconds: 300  // 5 minutes
+            update_apply_timeout_seconds: 300,  // 5 minutes
+            auth_max_retries: 10  // Max 10 authentication attempts before failing
         }
     }
 
@@ -134,6 +136,14 @@ impl CloudSettings {
                             .unwrap_or_else(|e| {
                                 println!("WARNING: Invalid timeout '{}': {}. Using default.", val, e);
                                 CloudSettings::default().update_apply_timeout_seconds
+                            });
+                    },
+                    "auth_max_retries" =>
+                    {
+                        settings.auth_max_retries = val.parse::<u32>()
+                            .unwrap_or_else(|e| {
+                                println!("WARNING: Invalid auth_max_retries '{}': {}. Using default.", val, e);
+                                CloudSettings::default().auth_max_retries
                             });
                     },
                     _ =>

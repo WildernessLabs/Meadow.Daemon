@@ -27,6 +27,7 @@ pub enum UpdateState {
     Dead,
     Disconnected,
     Authenticating,
+    AuthenticationFailed,
     Authenticated,
     Connecting,
     Connected,
@@ -330,12 +331,31 @@ impl UpdateService {
                         self.auth_fail_count = 0;
                     }
                     else {
-                        // adaptively get slower with fails, to a max time of 1min
-                        if self.auth_fail_count < 12 {
-                            self.auth_fail_count = self.auth_fail_count + 1;
+                        self.auth_fail_count += 1;
+
+                        // Check if we've exceeded max retries
+                        if self.auth_fail_count >= self.settings.auth_max_retries {
+                            eprintln!("ERROR: Authentication failed after {} attempts. Moving to AuthenticationFailed state.", self.auth_fail_count);
+                            eprintln!("This device may need to be provisioned. Check that the device ID is registered in Meadow.Cloud.");
+                            self.state = UpdateState::AuthenticationFailed;
+                        } else {
+                            // Exponential backoff with cap at 60 seconds
+                            let backoff_seconds = std::cmp::min(self.auth_fail_count * 5, 60);
+                            println!("Authentication attempt {}/{} failed. Retrying in {} seconds...",
+                                self.auth_fail_count, self.settings.auth_max_retries, backoff_seconds);
+                            thread::sleep(Duration::from_secs(u64::from(backoff_seconds)));
                         }
-                        thread::sleep(Duration::from_secs(u64::from(self.auth_fail_count * 5)));
                     }
+                },
+                UpdateState::AuthenticationFailed => {
+                    // Stay in this state until manual intervention
+                    // The REST API or service restart can reset this
+                    println!("Service is in AuthenticationFailed state. Manual intervention required.");
+                    println!("Possible actions:");
+                    println!("  1. Verify device is provisioned in Meadow.Cloud");
+                    println!("  2. Check SSH keys are present and valid");
+                    println!("  3. Restart the daemon to retry authentication");
+                    thread::sleep(Duration::from_secs(60)); // Check once per minute
                 },
                 UpdateState::Authenticated => {
                     let s = subscriber.clone();
@@ -366,8 +386,34 @@ impl UpdateService {
                     // look for any message from the subscriber
                     match self.update_receiver.try_recv() {
                         Ok(d) => {
-                            println!("{:?}", d);
+                            println!("Update notification received: {:?}", d);
 
+                            match self.store.lock() {
+                                Ok(mut store) => {
+                                    store.add(Arc::new(d));
+                                    // Transition to Idle state - updates are available in the store
+                                    self.state = UpdateState::Idle;
+                                },
+                                Err(e) => {
+                                    eprintln!("ERROR: Failed to lock store to add update: {}", e);
+                                }
+                            }
+                        },
+                        _ => {
+                            // No new updates, stay connected and idle
+                            // The daemon is waiting for update notifications from MQTT
+                        }
+                    }
+                },
+                UpdateState::Idle => {
+                    // Connected and waiting for update operations
+                    // Updates are managed via REST API (download/apply requests)
+                    // This is the steady state after connection is established
+
+                    // Check for any new update notifications
+                    match self.update_receiver.try_recv() {
+                        Ok(d) => {
+                            println!("New update notification received while idle: {:?}", d);
                             match self.store.lock() {
                                 Ok(mut store) => {
                                     store.add(Arc::new(d));
@@ -377,17 +423,28 @@ impl UpdateService {
                                 }
                             }
                         },
-                        _ => { /* no data */ }
+                        Err(_) => { /* No new updates */ }
                     }
-                },
-                UpdateState::Idle => {
-                    // TODO
+                    // Note: Download and apply operations happen via REST API
+                    // and are handled by the UpdateStore directly, not through state machine
                 },
                 UpdateState::DownloadingFile => {
-                    // TODO
+                    // This state is set by REST API when a download is initiated
+                    // The actual download happens in UpdateStore::retrieve_update()
+                    // State transitions back to Idle when download completes or fails
+
+                    // For now, this is a placeholder - downloads are synchronous in REST handlers
+                    // Future enhancement: make downloads async and track progress here
+                    println!("DownloadingFile state - download in progress via REST API");
                 },
-                UpdateState::UpdateInProgress=> {
-                    // TODO
+                UpdateState::UpdateInProgress => {
+                    // This state is set by REST API when an update application is initiated
+                    // The actual update happens in UpdateStore::apply_update()
+                    // State transitions back to Idle when update completes or fails
+
+                    // For now, this is a placeholder - updates are handled in spawned threads
+                    // Future enhancement: track update progress and handle cleanup here
+                    println!("UpdateInProgress state - update being applied via REST API");
                 },
                 _ => { } // nothing to do
             }

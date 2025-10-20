@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::sync::{Mutex, Arc};
 use std::thread::{self, sleep};
 use std::time::Duration;
-use std::{collections::HashMap, ops::Deref};
+use std::{collections::{HashMap, HashSet}, ops::Deref};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs::{self, OpenOptions, File};
@@ -200,6 +200,218 @@ impl UpdateStore {
         self.updates.clear();
     }
 
+    /// Detect the current version directory and its suffix from the application path
+    ///
+    /// Examples:
+    /// - /home/user/myapp/myapp -> (/home/user/myapp, "")
+    /// - /home/user/myapp-v1/myapp -> (/home/user/myapp-v1, "-v1")
+    /// - /home/user/myapp-v2/myapp -> (/home/user/myapp-v2, "-v2")
+    fn detect_version_directory(app_path: &PathBuf) -> Result<(PathBuf, String), String> {
+        let app_folder = app_path.parent()
+            .ok_or_else(|| "Failed to get application folder from path".to_string())?;
+
+        let folder_name = app_folder.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| "Failed to get folder name from path".to_string())?;
+
+        // Check if folder ends with -v1 or -v2
+        if folder_name.ends_with("-v1") {
+            Ok((app_folder.to_path_buf(), "-v1".to_string()))
+        } else if folder_name.ends_with("-v2") {
+            Ok((app_folder.to_path_buf(), "-v2".to_string()))
+        } else {
+            // No version suffix - use as is
+            Ok((app_folder.to_path_buf(), String::new()))
+        }
+    }
+
+    /// Get the alternate version path by toggling between -v1 and -v2 suffixes
+    ///
+    /// Examples:
+    /// - (/home/user/myapp, "") -> /home/user/myapp-v1
+    /// - (/home/user/myapp-v1, "-v1") -> /home/user/myapp-v2
+    /// - (/home/user/myapp-v2, "-v2") -> /home/user/myapp-v1
+    fn get_alternate_version_path(current_dir: &Path, current_suffix: &str) -> PathBuf {
+        let parent = current_dir.parent();
+        let folder_name = current_dir.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        let new_suffix = match current_suffix {
+            "-v1" => "-v2",
+            "-v2" => "-v1",
+            _ => "-v1", // No suffix means first update, use -v1 for new version
+        };
+
+        let base_name = if !current_suffix.is_empty() {
+            folder_name.trim_end_matches(current_suffix)
+        } else {
+            folder_name
+        };
+
+        let new_folder_name = format!("{}{}", base_name, new_suffix);
+
+        match parent {
+            Some(p) => p.join(new_folder_name),
+            None => PathBuf::from(new_folder_name),
+        }
+    }
+
+    /// Collect all files in a package directory recursively
+    /// Returns a HashSet of relative paths for quick lookup
+    fn collect_package_files(package_dir: &Path) -> Result<HashSet<PathBuf>, String> {
+        let mut files = HashSet::new();
+
+        if !package_dir.exists() {
+            return Err(format!("Package directory does not exist: {:?}", package_dir));
+        }
+
+        Self::collect_files_recursive(package_dir, package_dir, &mut files)?;
+
+        Ok(files)
+    }
+
+    /// Recursive helper for collect_package_files
+    fn collect_files_recursive(base_dir: &Path, current_dir: &Path, files: &mut HashSet<PathBuf>) -> Result<(), String> {
+        match fs::read_dir(current_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(e) => {
+                            let path = e.path();
+                            if path.is_file() {
+                                // Store relative path from base_dir
+                                if let Ok(rel_path) = path.strip_prefix(base_dir) {
+                                    files.insert(rel_path.to_path_buf());
+                                }
+                            } else if path.is_dir() {
+                                Self::collect_files_recursive(base_dir, &path, files)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("WARNING: Failed to read directory entry: {}", e);
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to read directory {:?}: {}", current_dir, e))
+        }
+    }
+
+    /// Merge preserved files from source directory to destination
+    /// Copies any file from source that doesn't exist in new_files set
+    fn merge_preserved_files(source_dir: &Path, dest_dir: &Path, new_files: &HashSet<PathBuf>) -> Result<usize, String> {
+        if !source_dir.exists() {
+            return Err(format!("Source directory does not exist: {:?}", source_dir));
+        }
+
+        let preserved_count = Self::merge_files_recursive(source_dir, source_dir, dest_dir, new_files)?;
+
+        Ok(preserved_count)
+    }
+
+    /// Recursive helper for merge_preserved_files
+    fn merge_files_recursive(base_dir: &Path, current_dir: &Path, dest_base: &Path, new_files: &HashSet<PathBuf>) -> Result<usize, String> {
+        let mut count = 0;
+
+        match fs::read_dir(current_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(e) => {
+                            let path = e.path();
+                            let rel_path = match path.strip_prefix(base_dir) {
+                                Ok(p) => p,
+                                Err(_) => continue,
+                            };
+
+                            if path.is_file() {
+                                // Only copy if NOT in new_files set
+                                if !new_files.contains(rel_path) {
+                                    let dest_path = dest_base.join(rel_path);
+
+                                    // Create parent directory if needed
+                                    if let Some(parent) = dest_path.parent() {
+                                        if let Err(e) = fs::create_dir_all(parent) {
+                                            return Err(format!("Failed to create directory {:?}: {}", parent, e));
+                                        }
+                                    }
+
+                                    // Copy the file
+                                    if let Err(e) = fs::copy(&path, &dest_path) {
+                                        return Err(format!("Failed to copy {:?} to {:?}: {}", path, dest_path, e));
+                                    }
+
+                                    count += 1;
+                                }
+                            } else if path.is_dir() {
+                                count += Self::merge_files_recursive(base_dir, &path, dest_base, new_files)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("WARNING: Failed to read directory entry: {}", e);
+                        }
+                    }
+                }
+                Ok(count)
+            }
+            Err(e) => Err(format!("Failed to read directory {:?}: {}", current_dir, e))
+        }
+    }
+
+    /// Perform atomic directory swap using two rename operations
+    ///
+    /// 1. rename(current, rollback) - backup current version
+    /// 2. rename(new, current) - activate new version
+    ///
+    /// If any operation fails, attempts to restore from rollback
+    fn atomic_directory_swap(current: &Path, new: &Path, rollback: &Path) -> Result<(), String> {
+        println!("ATOMIC OPERATION #1: Backing up current version");
+        println!("  Rename: {:?} -> {:?}", current, rollback);
+
+        // Clean up old rollback if it exists
+        if rollback.exists() {
+            println!("  Removing old rollback directory: {:?}", rollback);
+            if let Err(e) = fs::remove_dir_all(rollback) {
+                return Err(format!("Failed to remove old rollback directory: {}", e));
+            }
+        }
+
+        // ATOMIC OPERATION #1: Backup current version
+        if let Err(e) = fs::rename(current, rollback) {
+            return Err(format!("Failed to backup current version (rename {:?} -> {:?}): {}",
+                current, rollback, e));
+        }
+
+        println!("ATOMIC OPERATION #2: Activating new version");
+        println!("  Rename: {:?} -> {:?}", new, current);
+
+        // ATOMIC OPERATION #2: Activate new version
+        if let Err(e) = fs::rename(new, current) {
+            // CRITICAL ERROR: Try to restore from rollback
+            eprintln!("ERROR: Failed to activate new version: {}", e);
+            eprintln!("Attempting to restore from rollback...");
+
+            if let Err(restore_err) = fs::rename(rollback, current) {
+                return Err(format!(
+                    "CRITICAL: Failed to activate new version AND failed to restore rollback! \
+                    Original error: {}. Restore error: {}. \
+                    System may be in inconsistent state. Rollback is at: {:?}",
+                    e, restore_err, rollback
+                ));
+            }
+
+            return Err(format!("Failed to activate new version (restored from rollback): {}", e));
+        }
+
+        println!("Atomic directory swap completed successfully");
+        println!("  New version active at: {:?}", current);
+        println!("  Rollback available at: {:?}", rollback);
+
+        Ok(())
+    }
+
     pub async fn apply_update(&self, id: &String, app_path: &PathBuf, pid: i32, command: &Option<String>) -> Result<u64, String> {
         println!("APPLYING UPDATE {}", id);
 
@@ -297,47 +509,135 @@ impl UpdateStore {
                     _ => {
                         println!("'{}' exited after {} seconds", &app, start_time.elapsed().as_secs());
 
-                        // todo: copy existing app binaries to a rollback folder
+                        // Detect current version directory
+                        let (current_dir, current_suffix) = match Self::detect_version_directory(&p) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to detect version directory: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
 
-                        // move the update to the app folder
+                        println!("Detected current version: {:?} (suffix: {:?})", current_dir, current_suffix);
+
+                        // Get alternate version path for new version
+                        let new_version_dir = Self::get_alternate_version_path(&current_dir, &current_suffix);
+                        println!("Preparing new version at: {:?}", new_version_dir);
+
+                        // Clean up any existing alternate version directory
+                        if new_version_dir.exists() {
+                            println!("Removing existing alternate version directory: {:?}", new_version_dir);
+                            if let Err(e) = fs::remove_dir_all(&new_version_dir) {
+                                eprintln!("ERROR: Failed to remove existing alternate version: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        }
+
+                        // Create new version directory
+                        if let Err(e) = fs::create_dir_all(&new_version_dir) {
+                            eprintln!("ERROR: Failed to create new version directory: {}", e);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
+
+                        // Copy new files from extracted package to new version directory
+                        println!("Copying new files from package to {:?}", new_version_dir);
                         let opts = fs_extra::dir::CopyOptions::new()
-                        .overwrite(true)
-                        .content_only(true);
+                            .overwrite(true)
+                            .content_only(true);
 
-                        println!("Copying update from '{:?}' to '{}'", update_source_folder, application_folder);
+                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &new_version_dir, &opts) {
+                            eprintln!("ERROR: Failed to copy new files: {}", e);
+                            eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
+                            let _ = fs::remove_dir_all(&new_version_dir);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
 
-                        match fs_extra::dir::copy(
-                            &update_source_folder,
-                            application_folder,
-                            &opts) {
-                                Ok(_) => {
-                                    // Mark update as "applied" in descriptor
-                                    Self::mark_update_applied(&update_id, &store_root);
+                        // Collect list of files in the package (for preservation logic)
+                        let new_files = match Self::collect_package_files(&update_source_folder) {
+                            Ok(files) => files,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to collect package files: {}", e);
+                                eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
+                                let _ = fs::remove_dir_all(&new_version_dir);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
 
-                                    // Clean up temp extraction folder
-                                    println!("Cleaning up temp extraction folder: {}", temp_path);
-                                    let _ = fs::remove_dir_all(&temp_path);
+                        println!("Package contains {} files", new_files.len());
 
-                                    // restart the app
-                                    println!("Launching '{:?}'...", p);
+                        // Merge preserved files from current version
+                        println!("Merging preserved files from current version...");
+                        match Self::merge_preserved_files(&current_dir, &new_version_dir, &new_files) {
+                            Ok(count) => {
+                                println!("Preserved {} files from current version", count);
+                            }
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to merge preserved files: {}", e);
+                                eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
+                                let _ = fs::remove_dir_all(&new_version_dir);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        }
 
-                                    match local_command {
-                                        None => {
-                                            let _app = Command::new(&p)
-                                            .spawn()
-                                            .expect("Failed to start process");                                
-                                        },
-                                        Some(cmd) => {
-                                            let _app = Command::new(cmd)
-                                            .arg(&p)
-                                            .spawn()
-                                            .expect("Failed to start process");                                
-                                        },
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("Failed to copy update: {}", e);
-                                }
+                        // Determine rollback directory path
+                        let rollback_dir = if let Some(parent) = current_dir.parent() {
+                            let folder_name = current_dir.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("app");
+                            let base_name = folder_name.trim_end_matches(&current_suffix);
+                            parent.join(format!("{}-rollback", base_name))
+                        } else {
+                            PathBuf::from("app-rollback")
+                        };
+
+                        // Perform atomic directory swap
+                        println!("Performing atomic directory swap...");
+                        if let Err(e) = Self::atomic_directory_swap(&current_dir, &new_version_dir, &rollback_dir) {
+                            eprintln!("ERROR: Atomic swap failed: {}", e);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
+
+                        // Mark update as "applied" in descriptor
+                        Self::mark_update_applied(&update_id, &store_root);
+
+                        // Clean up temp extraction folder
+                        println!("Cleaning up temp extraction folder: {}", temp_path);
+                        let _ = fs::remove_dir_all(&temp_path);
+
+                        // Update completed successfully
+                        println!("Update applied successfully!");
+                        println!("  Active version: {:?}", current_dir);
+                        println!("  Rollback available: {:?}", rollback_dir);
+
+                        // Restart the app (path stays the same - still points to current_dir which now has new version)
+                        println!("Launching '{:?}'...", p);
+
+                        match local_command {
+                            None => {
+                                let _app = Command::new(&p)
+                                    .spawn()
+                                    .expect("Failed to start process");
+                            },
+                            Some(cmd) => {
+                                let _app = Command::new(cmd)
+                                    .arg(&p)
+                                    .spawn()
+                                    .expect("Failed to start process");
+                            },
                         }
 
                         return;

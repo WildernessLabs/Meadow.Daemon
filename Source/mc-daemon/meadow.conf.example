@@ -1,0 +1,115 @@
+#
+# Meadow.Daemon Configuration File Example
+#
+# This is a template configuration file for the Meadow daemon.
+# Copy this to /etc/meadow.conf or specify with MEADOW_CONFIG environment variable.
+#
+# All settings have sensible defaults. Lines starting with # are comments.
+#
+
+# ============================================================================
+# SERVICE SETTINGS
+# ============================================================================
+
+# Enable or disable the Meadow daemon cloud connection
+# Values: yes, no
+# Default: yes
+enabled yes
+
+# ============================================================================
+# PATH SETTINGS
+# ============================================================================
+
+# Root directory for all Meadow daemon operations
+# All update storage will be under {meadow_root}/updates/
+# Default: /opt/meadow
+# Environment variable: MEADOW_ROOT (overrides this setting)
+meadow_root /opt/meadow
+
+# ============================================================================
+# UPDATE SERVER SETTINGS (MQTT)
+# ============================================================================
+
+# Address of the Update/MQTT server
+# For Meadow.Cloud public server: tcp://mqtt.meadowcloud.co
+# For local development (WSL): tcp://172.26.0.1
+# For localhost: tcp://localhost
+update_server_address tcp://mqtt.meadowcloud.co
+
+# Port of the Update/MQTT server
+# Default: 1883 (standard MQTT port)
+# Secure MQTT: 8883
+update_server_port 1883
+
+# ============================================================================
+# AUTHENTICATION SETTINGS
+# ============================================================================
+
+# Use authentication when connecting to the Update server
+# Set to 'yes' for Meadow.Cloud, 'no' for local development
+# Default: yes
+use_authentication yes
+
+# Address of the authentication server
+# Default: https://www.meadowcloud.co
+auth_server_address https://www.meadowcloud.co
+
+# Port of the authentication server
+# Default: 443 (HTTPS)
+auth_server_port 443
+
+# Maximum number of authentication retry attempts before giving up
+# The daemon will retry authentication with exponential backoff (5s, 10s, 15s... up to 60s)
+# After reaching this limit, the daemon enters AuthenticationFailed state
+# Set to 0 to retry indefinitely (not recommended)
+# Default: 10
+# Recommended range: 5-20
+auth_max_retries 10
+
+# ============================================================================
+# MQTT TOPIC SETTINGS
+# ============================================================================
+
+# MQTT topics to listen to for update notifications
+# Supports macro substitution:
+#   {ID}  - Device's unique machine ID
+#   {OID} - Organization ID from JWT token
+# Multiple topics separated by semicolon
+# Default: {OID}/ota/{ID}
+# Example: ota;ota/{ID}/updates;{OID}/ota/{ID}
+mqtt_topics {OID}/ota/{ID}
+
+# ============================================================================
+# TIMING SETTINGS
+# ============================================================================
+
+# Retry interval when disconnected from Update server (in seconds)
+# The daemon will wait this long between reconnection attempts
+# Default: 15
+connect_retry_seconds 15
+
+# Timeout to wait for application to exit during update apply (in seconds)
+# If the application doesn't exit within this time, update is marked as failed
+# Default: 300 (5 minutes)
+# Recommended range: 60-600
+update_apply_timeout_seconds 300
+
+# ============================================================================
+# NOTES
+# ============================================================================
+#
+# Environment Variables:
+#   MEADOW_ROOT   - Overrides meadow_root setting
+#   MEADOW_CONFIG - Specifies config file location (default: /etc/meadow.conf)
+#
+# REST API:
+#   The daemon listens on port 5000 for REST API calls
+#   Endpoints:
+#     GET  /api/info              - Get daemon information
+#     GET  /api/updates           - List available updates
+#     PUT  /api/updates/{id}      - Download or apply update
+#     DELETE /api/updates         - Clear update store
+#
+# For more information, see:
+#   https://github.com/WildernessLabs/Meadow.Daemon
+#
