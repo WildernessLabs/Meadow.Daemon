@@ -200,61 +200,38 @@ impl UpdateStore {
         self.updates.clear();
     }
 
-    /// Detect the current version directory and its suffix from the application path
+    /// Get the application directory from the application path
     ///
     /// Examples:
-    /// - /home/user/myapp/myapp -> (/home/user/myapp, "")
-    /// - /home/user/myapp-v1/myapp -> (/home/user/myapp-v1, "-v1")
-    /// - /home/user/myapp-v2/myapp -> (/home/user/myapp-v2, "-v2")
-    fn detect_version_directory(app_path: &PathBuf) -> Result<(PathBuf, String), String> {
+    /// - /home/user/myapp/myapp -> /home/user/myapp
+    /// - /opt/myapp/bin/myapp -> /opt/myapp/bin
+    fn get_app_directory(app_path: &PathBuf) -> Result<PathBuf, String> {
         let app_folder = app_path.parent()
             .ok_or_else(|| "Failed to get application folder from path".to_string())?;
+        Ok(app_folder.to_path_buf())
+    }
 
-        let folder_name = app_folder.file_name()
+    /// Get staging and rollback directory paths for the update
+    ///
+    /// Examples:
+    /// - /home/user/myapp -> (/home/user/myapp-new, /home/user/myapp-rollback)
+    fn get_update_directories(app_dir: &Path) -> Result<(PathBuf, PathBuf), String> {
+        let parent = app_dir.parent();
+        let folder_name = app_dir.file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| "Failed to get folder name from path".to_string())?;
 
-        // Check if folder ends with -v1 or -v2
-        if folder_name.ends_with("-v1") {
-            Ok((app_folder.to_path_buf(), "-v1".to_string()))
-        } else if folder_name.ends_with("-v2") {
-            Ok((app_folder.to_path_buf(), "-v2".to_string()))
-        } else {
-            // No version suffix - use as is
-            Ok((app_folder.to_path_buf(), String::new()))
-        }
-    }
-
-    /// Get the alternate version path by toggling between -v1 and -v2 suffixes
-    ///
-    /// Examples:
-    /// - (/home/user/myapp, "") -> /home/user/myapp-v1
-    /// - (/home/user/myapp-v1, "-v1") -> /home/user/myapp-v2
-    /// - (/home/user/myapp-v2, "-v2") -> /home/user/myapp-v1
-    fn get_alternate_version_path(current_dir: &Path, current_suffix: &str) -> PathBuf {
-        let parent = current_dir.parent();
-        let folder_name = current_dir.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-
-        let new_suffix = match current_suffix {
-            "-v1" => "-v2",
-            "-v2" => "-v1",
-            _ => "-v1", // No suffix means first update, use -v1 for new version
+        let staging_dir = match parent {
+            Some(p) => p.join(format!("{}-new", folder_name)),
+            None => PathBuf::from(format!("{}-new", folder_name)),
         };
 
-        let base_name = if !current_suffix.is_empty() {
-            folder_name.trim_end_matches(current_suffix)
-        } else {
-            folder_name
+        let rollback_dir = match parent {
+            Some(p) => p.join(format!("{}-rollback", folder_name)),
+            None => PathBuf::from(format!("{}-rollback", folder_name)),
         };
 
-        let new_folder_name = format!("{}{}", base_name, new_suffix);
-
-        match parent {
-            Some(p) => p.join(new_folder_name),
-            None => PathBuf::from(new_folder_name),
-        }
+        Ok((staging_dir, rollback_dir))
     }
 
     /// Collect all files in a package directory recursively
@@ -509,52 +486,62 @@ impl UpdateStore {
                     _ => {
                         println!("'{}' exited after {} seconds", &app, start_time.elapsed().as_secs());
 
-                        // Detect current version directory
-                        let (current_dir, current_suffix) = match Self::detect_version_directory(&p) {
-                            Ok(result) => result,
+                        // Get application directory
+                        let app_dir = match Self::get_app_directory(&p) {
+                            Ok(dir) => dir,
                             Err(e) => {
-                                eprintln!("ERROR: Failed to detect version directory: {}", e);
+                                eprintln!("ERROR: Failed to get application directory: {}", e);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         };
 
-                        println!("Detected current version: {:?} (suffix: {:?})", current_dir, current_suffix);
+                        println!("Application directory: {:?}", app_dir);
 
-                        // Get alternate version path for new version
-                        let new_version_dir = Self::get_alternate_version_path(&current_dir, &current_suffix);
-                        println!("Preparing new version at: {:?}", new_version_dir);
+                        // Get staging and rollback directory paths
+                        let (staging_dir, rollback_dir) = match Self::get_update_directories(&app_dir) {
+                            Ok(dirs) => dirs,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to get update directories: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
 
-                        // Clean up any existing alternate version directory
-                        if new_version_dir.exists() {
-                            println!("Removing existing alternate version directory: {:?}", new_version_dir);
-                            if let Err(e) = fs::remove_dir_all(&new_version_dir) {
-                                eprintln!("ERROR: Failed to remove existing alternate version: {}", e);
+                        println!("Staging directory: {:?}", staging_dir);
+                        println!("Rollback directory: {:?}", rollback_dir);
+
+                        // Clean up any existing staging directory
+                        if staging_dir.exists() {
+                            println!("Removing existing staging directory: {:?}", staging_dir);
+                            if let Err(e) = fs::remove_dir_all(&staging_dir) {
+                                eprintln!("ERROR: Failed to remove existing staging directory: {}", e);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Create new version directory
-                        if let Err(e) = fs::create_dir_all(&new_version_dir) {
-                            eprintln!("ERROR: Failed to create new version directory: {}", e);
+                        // Create staging directory
+                        if let Err(e) = fs::create_dir_all(&staging_dir) {
+                            eprintln!("ERROR: Failed to create staging directory: {}", e);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
 
-                        // Copy new files from extracted package to new version directory
-                        println!("Copying new files from package to {:?}", new_version_dir);
+                        // Copy new files from extracted package to staging directory
+                        println!("Copying new files from package to {:?}", staging_dir);
                         let opts = fs_extra::dir::CopyOptions::new()
                             .overwrite(true)
                             .content_only(true);
 
-                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &new_version_dir, &opts) {
+                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &staging_dir, &opts) {
                             eprintln!("ERROR: Failed to copy new files: {}", e);
-                            eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
-                            let _ = fs::remove_dir_all(&new_version_dir);
+                            eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                            let _ = fs::remove_dir_all(&staging_dir);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
@@ -565,8 +552,8 @@ impl UpdateStore {
                             Ok(files) => files,
                             Err(e) => {
                                 eprintln!("ERROR: Failed to collect package files: {}", e);
-                                eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
-                                let _ = fs::remove_dir_all(&new_version_dir);
+                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                                let _ = fs::remove_dir_all(&staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
@@ -577,34 +564,23 @@ impl UpdateStore {
 
                         // Merge preserved files from current version
                         println!("Merging preserved files from current version...");
-                        match Self::merge_preserved_files(&current_dir, &new_version_dir, &new_files) {
+                        match Self::merge_preserved_files(&app_dir, &staging_dir, &new_files) {
                             Ok(count) => {
                                 println!("Preserved {} files from current version", count);
                             }
                             Err(e) => {
                                 eprintln!("ERROR: Failed to merge preserved files: {}", e);
-                                eprintln!("Cleaning up new version directory: {:?}", new_version_dir);
-                                let _ = fs::remove_dir_all(&new_version_dir);
+                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                                let _ = fs::remove_dir_all(&staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Determine rollback directory path
-                        let rollback_dir = if let Some(parent) = current_dir.parent() {
-                            let folder_name = current_dir.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("app");
-                            let base_name = folder_name.trim_end_matches(&current_suffix);
-                            parent.join(format!("{}-rollback", base_name))
-                        } else {
-                            PathBuf::from("app-rollback")
-                        };
-
                         // Perform atomic directory swap
                         println!("Performing atomic directory swap...");
-                        if let Err(e) = Self::atomic_directory_swap(&current_dir, &new_version_dir, &rollback_dir) {
+                        if let Err(e) = Self::atomic_directory_swap(&app_dir, &staging_dir, &rollback_dir) {
                             eprintln!("ERROR: Atomic swap failed: {}", e);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path);
                             let _ = fs::remove_dir_all(&temp_path);
@@ -620,7 +596,7 @@ impl UpdateStore {
 
                         // Update completed successfully
                         println!("Update applied successfully!");
-                        println!("  Active version: {:?}", current_dir);
+                        println!("  Active version: {:?}", app_dir);
                         println!("  Rollback available: {:?}", rollback_dir);
 
                         // Restart the app (path stays the same - still points to current_dir which now has new version)
