@@ -176,10 +176,12 @@ impl UpdateService {
                                             return false;
                                         }
                                     };
-                                    let private_key_pem = match Crypto::get_private_key_pem() {
+                                    let private_key_pem = match Crypto::get_private_key_pem(Some(&self.settings.ssh_key_path)) {
                                         Ok(key) => key,
                                         Err(e) => {
                                             eprintln!("ERROR: Failed to get private key: {}", e);
+                                            eprintln!("  Key path: {:?}", self.settings.ssh_key_path);
+                                            eprintln!("  You can configure the SSH key path in /etc/meadow.conf using the 'ssh_key_path' setting.");
                                             eprintln!("Authentication cannot proceed without SSH keys.");
                                             return false;
                                         }

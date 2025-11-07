@@ -66,6 +66,13 @@ auth_server_port 443
 # Recommended range: 5-20
 auth_max_retries 10
 
+# Path to SSH private key for authentication
+# The public key is expected to be at the same path with '.pub' appended
+# Default: ~/.ssh/id_rsa (uses the current user's HOME directory)
+# Example for custom location: /home/myuser/.ssh/meadow_rsa
+# Note: The daemon will automatically use $HOME/.ssh/id_rsa if this is not set
+#ssh_key_path /home/myuser/.ssh/id_rsa
+
 # ============================================================================
 # MQTT TOPIC SETTINGS
 # ============================================================================

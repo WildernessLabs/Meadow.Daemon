@@ -90,8 +90,10 @@ impl ServiceInfo {
                 os_name: info.sysname,
                 machine: info.machine
             },
-            public_key: Crypto::get_public_key_pem().unwrap_or_else(|e| {
+            public_key: Crypto::get_public_key_pem(None).unwrap_or_else(|e| {
                 eprintln!("WARNING: Failed to get public key: {}. Using placeholder.", e);
+                eprintln!("  Looked in ~/.ssh/id_rsa.pub (or /root/.ssh/id_rsa.pub)");
+                eprintln!("  You can configure the SSH key path in /etc/meadow.conf using the 'ssh_key_path' setting.");
                 "[No Public Key]".to_string()
             })
         }

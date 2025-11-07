@@ -14,10 +14,21 @@ pub struct CloudSettings {
     pub mqtt_topics: Vec<String>,
     pub connect_retry_seconds: u64,
     pub update_apply_timeout_seconds: u64,
-    pub auth_max_retries: u32
+    pub auth_max_retries: u32,
+    pub ssh_key_path: PathBuf,
 }
 
 impl CloudSettings {
+    fn get_default_ssh_key_path() -> PathBuf {
+        // Try to get the current user's home directory
+        if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home).join(".ssh").join("id_rsa")
+        } else {
+            // Fallback to a common default if HOME is not set
+            PathBuf::from("/root/.ssh/id_rsa")
+        }
+    }
+
     pub fn default() -> CloudSettings {
         CloudSettings{
             enabled: true,
@@ -30,7 +41,8 @@ impl CloudSettings {
             mqtt_topics: vec!["{OID}/ota/{ID}".to_string()],
             connect_retry_seconds: 15,
             update_apply_timeout_seconds: 300,  // 5 minutes
-            auth_max_retries: 10  // Max 10 authentication attempts before failing
+            auth_max_retries: 10,  // Max 10 authentication attempts before failing
+            ssh_key_path: Self::get_default_ssh_key_path(),
         }
     }
 
@@ -145,6 +157,10 @@ impl CloudSettings {
                                 println!("WARNING: Invalid auth_max_retries '{}': {}. Using default.", val, e);
                                 CloudSettings::default().auth_max_retries
                             });
+                    },
+                    "ssh_key_path" =>
+                    {
+                        settings.ssh_key_path = PathBuf::from(val);
                     },
                     _ =>
                     {

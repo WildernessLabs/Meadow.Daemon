@@ -27,48 +27,40 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    println!("Creating update store...");
     let update_store: Arc<Mutex<UpdateStore>> = Arc::new(Mutex::new(UpdateStore::new(settings.clone())));
 
-    let mut update_service = UpdateService::new(settings, machine_id.clone(), update_store.clone());
-    
+    println!("Creating update service...");
+    let mut update_service = UpdateService::new(settings.clone(), machine_id.clone(), update_store.clone());
+
+    println!("Spawning UpdateService in background thread...");
+    std::thread::spawn(move || {
+        println!("UpdateService thread started!");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for UpdateService");
+
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&rt, async move {
+            println!("UpdateService task starting...");
+            update_service.start().await;
+            println!("UpdateService task ended!");
+        });
+    });
+
+    println!("Creating REST server...");
     let mut rest_server = rest_server::RestServer::new();
 
-
-
-    let mut set = tokio::task::JoinSet::new();
-
-    set.spawn_local(async move { 
-        update_service.start().await; 
-    });
-    set.spawn_local(async move { 
-        let _ = rest_server.start(update_store).await; 
-    });
-
-    while let Some(res) = set.join_next().await {
-        if let Err(e) = res {
-            eprintln!("Task error: {}", e);
+    println!("Starting REST server in main thread...");
+    match rest_server.start(update_store).await {
+        Ok(_) => {
+            println!("REST server stopped");
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("ERROR: REST server failed: {}", e);
+            Err(e)
         }
     }
-
-    //    let us = std::thread::spawn(move || {
-//        handle.spawn(async { update_service.start() } ) });
-
-//    let rs = handle.spawn(rest_server.start(update_store).await);
-
-//    tokio::join!(us, rs);
-
-//    update_service.start();
-
-/*
-    tokio::spawn(async move {
-        update_service.start();
-    }); 
-
-
-    match rest_server.start(update_store).await {
-        Err(e) => { println!("Unable to start REST server: {}", e); },
-        _ => { println!("daemon exited!"); }
-    }
-*/    
-    Ok(())
 }
