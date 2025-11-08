@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 pub struct CloudSettings {
     pub enabled: bool,
     pub meadow_root: PathBuf,
+    pub rest_api_bind_address: String,
     pub update_server_address: String,
     pub update_server_port: i32,
     pub use_authentication: bool,
@@ -33,6 +34,7 @@ impl CloudSettings {
         CloudSettings{
             enabled: true,
             meadow_root: PathBuf::from("/opt/meadow"),
+            rest_api_bind_address: "127.0.0.1".to_string(),  // Localhost only for security
             update_server_address: "".to_string(),
             update_server_port: 883,
             use_authentication: true,
@@ -101,6 +103,10 @@ impl CloudSettings {
                     "meadow_root" =>
                     {
                         settings.meadow_root = PathBuf::from(val);
+                    },
+                    "rest_api_bind_address" =>
+                    {
+                        settings.rest_api_bind_address = val.into();
                     },
                     "update_server_address" =>
                     {

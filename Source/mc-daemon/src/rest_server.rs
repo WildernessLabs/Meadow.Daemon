@@ -39,7 +39,7 @@ struct ServiceInfo {
 #[derive(Serialize, Deserialize)]
 struct UpdateAction {
     action: String,
-    pid: i32,
+    pid: Option<i32>,
     app_dir: Option<String>,
     command: Option<String>
 }
@@ -105,9 +105,9 @@ impl RestServer {
         RestServer { }
     }
    
-    pub async fn start(&mut self, store: Arc<Mutex<UpdateStore>>) -> std::io::Result<()> {
-        
-        println!("Meadow daemon listening for REST calls on port {}", PORT);
+    pub async fn start(&mut self, store: Arc<Mutex<UpdateStore>>, bind_address: &str) -> std::io::Result<()> {
+
+        println!("Meadow daemon listening for REST calls on {}:{}", bind_address, PORT);
 
         HttpServer::new(move || {
             App::new()
@@ -120,7 +120,7 @@ impl RestServer {
                         .route("/updates", web::delete().to(Self::clear_update_store))
                 )
         })
-            .bind(format!("0.0.0.0:{}", PORT))?
+            .bind(format!("{}:{}", bind_address, PORT))?
             .run()
             .await
     }
@@ -177,7 +177,7 @@ impl RestServer {
             },
             "apply" => {
                 println!("Apply update {}", id);
-                let pid = data.pid;
+                let pid = data.pid.unwrap_or(0);
                 let  app_path;
 
                 match &data.app_dir {
@@ -187,11 +187,11 @@ impl RestServer {
                                 app_path = path;
                             },
                             Err(_) => {
-                                let msg = format!("Caller sent in an invalid PID {}", data.pid);
+                                let msg = format!("Caller sent in an invalid PID {}", pid);
                                 println!("{}", msg);
                                 return HttpResponse::NotFound().body(msg);
                             }
-                        }    
+                        }
                     },
                     Some(p) => {
                         // TODO verify the provided path is valid?
@@ -220,7 +220,7 @@ impl RestServer {
                 }
                 else {
                     // TODO: should we support non-pid apply calls?
-                    let msg = format!("Caller did not provide a PID");
+                    let msg = format!("Caller did not provide a valid PID");
                     println!("{}", msg);
                     return HttpResponse::BadRequest().body(msg);
                 }

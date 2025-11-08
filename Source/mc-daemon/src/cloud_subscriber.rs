@@ -121,35 +121,48 @@ impl CloudSubscriber {
         loop {
             println!("making MQTT connection to {}:\n", host);
             match client.connect(conn_opts.clone()) {
-                Ok(_response) => {
+                Ok(response) => {
+                    println!("MQTT connection succeeded! Response: {:?}", response);
                     break;
                 },
                 Err(e) => {
                     println!("MQTT connection failed: {}\n", e);
+                    println!("Retrying in {} seconds...", self.settings.connect_retry_seconds);
+                    thread::sleep(Duration::from_secs(self.settings.connect_retry_seconds));
                 }
             }
         }
 
+        println!("Sending Connected state to UpdateService...");
         if let Err(e) = state_sender.send(UpdateState::Connected) {
             println!("ERROR: Failed to send Connected state: {}", e);
+        } else {
+            println!("Connected state sent successfully");
         }
 
         // Subscribe to topics.
         self.subscribe_topics(&client, &self.settings.mqtt_topics);
 
-        println!("Processing requests...");
+        println!("Processing requests... waiting for MQTT messages");
+        println!("Subscribed to topics: {:?}", self.settings.mqtt_topics);
 
         loop {
             match receiver.recv() {
                 Ok(Some(msg)) => {
-                    println!("Received message: {:?}", msg);
-                    // Process the message here
+                    println!("\n>>> MQTT MESSAGE RECEIVED <<<");
+                    println!("Topic: {}", msg.topic());
+                    println!("Payload: {}", msg.payload_str());
+                    println!("QoS: {:?}", msg.qos());
 
+                    // Process the message here
                     match UpdateParser::parse_message(msg.payload_str().as_ref()) {
                         Ok(update) => {
+                            println!("Successfully parsed update: {:?}", update);
                             // pass the descriptor back to the update service
                             if let Err(e) = sender.send(update) {
                                 println!("ERROR: Failed to send update descriptor: {}", e);
+                            } else {
+                                println!("Update descriptor sent to UpdateService");
                             }
                         }
                         Err(e) => {
@@ -158,7 +171,7 @@ impl CloudSubscriber {
                     }
                 }
                 Ok(None) => {
-                    println!("No message received, but client is still active.");
+                    println!("Receiver returned None (timeout or spurious wakeup)");
 
                     if !client.is_connected() {
                         if self.try_reconnect(&client) {

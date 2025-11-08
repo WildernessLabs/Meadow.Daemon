@@ -27,6 +27,19 @@ enabled yes
 meadow_root /opt/meadow
 
 # ============================================================================
+# REST API SETTINGS
+# ============================================================================
+
+# Bind address for the REST API server
+# The daemon's REST API listens on port 5000 for update management commands
+# Use 127.0.0.1 for localhost-only access (production/secure)
+# Use 0.0.0.0 to allow remote connections (development/testing)
+# Default: 127.0.0.1 (localhost only for security)
+# Security Warning: Using 0.0.0.0 allows any device on your network to access
+#                   the daemon's REST API. Only use for development/testing.
+rest_api_bind_address 127.0.0.1
+
+# ============================================================================
 # UPDATE SERVER SETTINGS (MQTT)
 # ============================================================================
 
