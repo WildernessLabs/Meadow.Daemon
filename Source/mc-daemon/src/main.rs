@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
     let mut rest_server = rest_server::RestServer::new();
 
     println!("Starting REST server in main thread...");
-    match rest_server.start(update_store, &settings.rest_api_bind_address).await {
+    match rest_server.start(update_store, settings.clone(), &settings.rest_api_bind_address).await {
         Ok(_) => {
             println!("REST server stopped");
             Ok(())

@@ -44,6 +44,20 @@ struct UpdateAction {
     command: Option<String>
 }
 
+#[derive(Serialize, Deserialize)]
+struct FileInfo {
+    name: String,
+    #[serde(rename = "isDirectory")]
+    is_directory: bool,
+    size: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FileListResponse {
+    path: String,
+    files: Vec<FileInfo>,
+}
+
 pub struct RestServer;
 
 fn trim_newline(s: &mut String) {
@@ -53,6 +67,30 @@ fn trim_newline(s: &mut String) {
             s.pop();
         }
     }
+}
+
+fn validate_and_resolve_path(
+    root: &PathBuf,
+    requested_path: Option<&str>
+) -> Result<PathBuf, String> {
+    // Use root if no path specified
+    let target = match requested_path {
+        Some(p) if !p.is_empty() => root.join(p),
+        _ => root.clone(),
+    };
+
+    // Canonicalize both paths
+    let canonical_root = root.canonicalize()
+        .map_err(|e| format!("Invalid root: {}", e))?;
+    let canonical_target = target.canonicalize()
+        .map_err(|e| format!("Path not found: {}", e))?;
+
+    // Security check: ensure target is within root
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("Path traversal attempt detected".to_string());
+    }
+
+    Ok(canonical_target)
 }
 
 impl ServiceInfo {
@@ -105,19 +143,22 @@ impl RestServer {
         RestServer { }
     }
    
-    pub async fn start(&mut self, store: Arc<Mutex<UpdateStore>>, bind_address: &str) -> std::io::Result<()> {
+    pub async fn start(&mut self, store: Arc<Mutex<UpdateStore>>, settings: crate::cloud_settings::CloudSettings, bind_address: &str) -> std::io::Result<()> {
 
         println!("Meadow daemon listening for REST calls on {}:{}", bind_address, PORT);
 
         HttpServer::new(move || {
             App::new()
                 .app_data(web::Data::new(store.clone()))
+                .app_data(web::Data::new(settings.clone()))
                 .service(
                     web::scope("api")
                         .route("/info", web::get().to(Self::get_daemon_info))
                         .route("/updates", web::get().to(Self::get_updates))
                         .route("/updates/{id}", web::put().to(Self::update_action))
                         .route("/updates", web::delete().to(Self::clear_update_store))
+                        .route("/files", web::get().to(Self::list_files))
+                        .route("/files/{path:.*}", web::get().to(Self::list_files))
                 )
         })
             .bind(format!("{}:{}", bind_address, PORT))?
@@ -263,5 +304,66 @@ impl RestServer {
 
         Ok(HttpResponse::Ok().json(result))
     }
-   
+
+    async fn list_files(
+        settings: web::Data<crate::cloud_settings::CloudSettings>,
+        path: web::Path<String>,
+    ) -> Result<HttpResponse, Error> {
+        let requested_path = path.into_inner();
+        let requested_path = if requested_path.is_empty() {
+            None
+        } else {
+            Some(requested_path.as_str())
+        };
+
+        // Validate and resolve path
+        let target_path = match validate_and_resolve_path(&settings.meadow_root, requested_path) {
+            Ok(p) => p,
+            Err(e) => return Ok(HttpResponse::BadRequest().body(e)),
+        };
+
+        // Check if path is a directory
+        if !target_path.is_dir() {
+            return Ok(HttpResponse::BadRequest().body("Path is not a directory"));
+        }
+
+        // Read directory entries
+        let entries = match fs::read_dir(&target_path) {
+            Ok(e) => e,
+            Err(e) => return Ok(HttpResponse::InternalServerError()
+                .body(format!("Failed to read directory: {}", e))),
+        };
+
+        // Collect file information
+        let mut files: Vec<FileInfo> = Vec::new();
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Ok(metadata) = entry.metadata() {
+                    files.push(FileInfo {
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        is_directory: metadata.is_dir(),
+                        size: if metadata.is_file() { metadata.len() } else { 0 },
+                    });
+                }
+            }
+        }
+
+        // Sort: directories first, then alphabetically
+        files.sort_by(|a, b| {
+            match (a.is_directory, b.is_directory) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            }
+        });
+
+        // Build response
+        let response = FileListResponse {
+            path: requested_path.unwrap_or("").to_string(),
+            files,
+        };
+
+        Ok(HttpResponse::Ok().json(response))
+    }
+
 }
