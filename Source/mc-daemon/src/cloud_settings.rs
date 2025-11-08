@@ -17,6 +17,7 @@ pub struct CloudSettings {
     pub update_apply_timeout_seconds: u64,
     pub auth_max_retries: u32,
     pub ssh_key_path: PathBuf,
+    pub auto_download_updates: bool,
 }
 
 impl CloudSettings {
@@ -45,6 +46,7 @@ impl CloudSettings {
             update_apply_timeout_seconds: 300,  // 5 minutes
             auth_max_retries: 10,  // Max 10 authentication attempts before failing
             ssh_key_path: Self::get_default_ssh_key_path(),
+            auto_download_updates: false,  // Disabled by default for backward compatibility
         }
     }
 
@@ -167,6 +169,10 @@ impl CloudSettings {
                     "ssh_key_path" =>
                     {
                         settings.ssh_key_path = PathBuf::from(val);
+                    },
+                    "auto_download_updates" =>
+                    {
+                        settings.auto_download_updates = val.to_lowercase() == "yes";
                     },
                     _ =>
                     {

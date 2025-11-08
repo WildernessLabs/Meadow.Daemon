@@ -7,6 +7,8 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
 use std::time::Duration;
+// Suppress deprecation warnings from underlying cbc/aes crates using old generic_array
+#[allow(deprecated)]
 use cbc::cipher::{KeyIvInit, BlockDecryptMut, generic_array::GenericArray, typenum::U16};
 
 use crate::{cloud_settings::CloudSettings, cloud_subscriber::CloudSubscriber, update_store::UpdateStore, update_descriptor::UpdateDescriptor, crypto::Crypto};
@@ -122,8 +124,9 @@ impl UpdateService {
             Err("Failed to remove padding: Data is empty".into())
         }
     }
-    
+
     //#[tokio::main] // this doesn't make it 'main' it just makes it synchonous (thanks for clarity, tokio!)
+    #[allow(deprecated)]  // Suppress warnings from cbc/aes crates using old generic_array
     async fn _authenticate(&mut self) -> bool {
         // connect to the cloud and get a JWT
         let device_id = match fs::read_to_string("/var/lib/dbus/machine-id") {
@@ -389,10 +392,21 @@ impl UpdateService {
                     match self.update_receiver.try_recv() {
                         Ok(d) => {
                             println!("Update notification received: {:?}", d);
+                            let update_id = d.mpak_id.clone();
 
                             match self.store.lock() {
                                 Ok(mut store) => {
                                     store.add(Arc::new(d));
+
+                                    // Auto-download if enabled
+                                    if self.settings.auto_download_updates {
+                                        println!("Auto-downloading update: {}", update_id);
+                                        match store.retrieve_update(&update_id).await {
+                                            Ok(size) => println!("Auto-download completed: {} bytes", size),
+                                            Err(e) => eprintln!("WARNING: Auto-download failed: {}. Update can be downloaded manually via REST API.", e)
+                                        }
+                                    }
+
                                     // Transition to Idle state - updates are available in the store
                                     self.state = UpdateState::Idle;
                                 },
@@ -416,9 +430,20 @@ impl UpdateService {
                     match self.update_receiver.try_recv() {
                         Ok(d) => {
                             println!("New update notification received while idle: {:?}", d);
+                            let update_id = d.mpak_id.clone();
+
                             match self.store.lock() {
                                 Ok(mut store) => {
                                     store.add(Arc::new(d));
+
+                                    // Auto-download if enabled
+                                    if self.settings.auto_download_updates {
+                                        println!("Auto-downloading update: {}", update_id);
+                                        match store.retrieve_update(&update_id).await {
+                                            Ok(size) => println!("Auto-download completed: {} bytes", size),
+                                            Err(e) => eprintln!("WARNING: Auto-download failed: {}. Update can be downloaded manually via REST API.", e)
+                                        }
+                                    }
                                 },
                                 Err(e) => {
                                     eprintln!("ERROR: Failed to lock store to add update: {}", e);

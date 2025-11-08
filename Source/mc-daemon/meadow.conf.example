@@ -99,6 +99,15 @@ auth_max_retries 10
 # Example: ota;ota/{ID}/updates;{OID}/ota/{ID}
 mqtt_topics {OID}/ota/{ID}
 
+# Automatically download update packages when published via MQTT
+# When set to 'yes', the daemon will automatically download update packages
+# immediately after receiving update notifications, without requiring a manual
+# REST API download call. The download blocks the state machine for 1-5 seconds.
+# When set to 'no', updates must be downloaded manually via REST API.
+# Values: yes, no
+# Default: no (backward compatibility)
+auto_download_updates no
+
 # ============================================================================
 # TIMING SETTINGS
 # ============================================================================

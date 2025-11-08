@@ -7,24 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy, BufReader};
-use serde::{Serialize, Deserialize};
 use zip::ZipArchive;
 
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
-
-#[derive(Serialize, Deserialize)]
-struct MeadowCloudLoginResponseMessage {
-    #[serde(alias = "encryptedKey")]
-    encrypted_key: String,
-    #[serde(alias = "encryptedToken")]
-    encrypted_token: String,
-    iv: String
-}
-
-#[derive(Serialize, Deserialize)]
-struct MeadowCloudLoginRequestMessage {
-    id: String,
-}
 
 pub struct UpdateStore {
     _settings: CloudSettings,
