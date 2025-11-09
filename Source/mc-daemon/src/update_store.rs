@@ -23,7 +23,7 @@ impl UpdateStore {
     const UPDATE_INFO_FILE_NAME: &'static str = "info.json";
 
     pub fn new(settings: CloudSettings) -> UpdateStore {
-        let store_root = settings.meadow_root.join("updates");
+        let store_root = settings.update_store_path.clone();
 
         let mut store = UpdateStore {
             _settings : settings,
@@ -397,15 +397,31 @@ impl UpdateStore {
             }
         };
         let package_path = format!("{}/{}/update.mpak", self.store_root_folder.display(), d.mpak_id);
-        let update_temp_path = format!("{}/{}/tmp", self.store_root_folder.display(), d.mpak_id);
-        if let Err(e) = self.extract_package_to_location(package_path, &update_temp_path) {
+        let update_temp_path = &self._settings.temp_extract_path;
+
+        // Clean temp folder before extracting
+        if update_temp_path.exists() {
+            println!("Cleaning temp extract folder: {:?}", update_temp_path);
+            if let Err(e) = fs::remove_dir_all(update_temp_path) {
+                eprintln!("WARNING: Failed to clean temp extract folder: {}", e);
+            }
+        }
+        // Recreate the directory
+        if let Err(e) = fs::create_dir_all(update_temp_path) {
+            let msg = format!("Failed to create temp extract directory: {}", e);
+            eprintln!("ERROR: {}", msg);
+            return Err(msg);
+        }
+
+        let update_temp_path_str = update_temp_path.to_string_lossy().to_string();
+        if let Err(e) = self.extract_package_to_location(package_path, &update_temp_path_str) {
             let msg = format!("Failed to extract package: {}", e);
             eprintln!("ERROR: {}", msg);
             return Err(msg);
         }
 
         // make sure it's a valid app update (i.e. has an `app` folder)
-        let update_source_folder = Path::new(&update_temp_path).join("app");
+        let update_source_folder = update_temp_path.join("app");
         if !update_source_folder.is_dir() {
             println!("Not a valid app update");
             return Err("Package does not contain a valid Application update".to_string());
@@ -451,7 +467,7 @@ impl UpdateStore {
                 // Check for timeout
                 if elapsed_secs >= timeout_seconds {
                     println!("ERROR: Timeout waiting for '{}' to exit after {} seconds", app, timeout_seconds);
-                    println!("Cleaning up temp extraction folder: {}", temp_path);
+                    println!("Cleaning up temp extraction folder: {}", temp_path.display());
                     let _ = fs::remove_dir_all(&temp_path);
                     // TODO: Mark update as "failed" in descriptor
                     return;
@@ -476,7 +492,7 @@ impl UpdateStore {
                             Ok(dir) => dir,
                             Err(e) => {
                                 eprintln!("ERROR: Failed to get application directory: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
@@ -489,7 +505,7 @@ impl UpdateStore {
                             Ok(dirs) => dirs,
                             Err(e) => {
                                 eprintln!("ERROR: Failed to get update directories: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
@@ -503,7 +519,7 @@ impl UpdateStore {
                             println!("Removing existing staging directory: {:?}", staging_dir);
                             if let Err(e) = fs::remove_dir_all(&staging_dir) {
                                 eprintln!("ERROR: Failed to remove existing staging directory: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
@@ -512,7 +528,7 @@ impl UpdateStore {
                         // Create staging directory
                         if let Err(e) = fs::create_dir_all(&staging_dir) {
                             eprintln!("ERROR: Failed to create staging directory: {}", e);
-                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
@@ -527,7 +543,7 @@ impl UpdateStore {
                             eprintln!("ERROR: Failed to copy new files: {}", e);
                             eprintln!("Cleaning up staging directory: {:?}", staging_dir);
                             let _ = fs::remove_dir_all(&staging_dir);
-                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
@@ -539,7 +555,7 @@ impl UpdateStore {
                                 eprintln!("ERROR: Failed to collect package files: {}", e);
                                 eprintln!("Cleaning up staging directory: {:?}", staging_dir);
                                 let _ = fs::remove_dir_all(&staging_dir);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
@@ -557,7 +573,7 @@ impl UpdateStore {
                                 eprintln!("ERROR: Failed to merge preserved files: {}", e);
                                 eprintln!("Cleaning up staging directory: {:?}", staging_dir);
                                 let _ = fs::remove_dir_all(&staging_dir);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
@@ -567,7 +583,7 @@ impl UpdateStore {
                         println!("Performing atomic directory swap...");
                         if let Err(e) = Self::atomic_directory_swap(&app_dir, &staging_dir, &rollback_dir) {
                             eprintln!("ERROR: Atomic swap failed: {}", e);
-                            eprintln!("Cleaning up temp extraction folder: {}", temp_path);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
@@ -576,7 +592,230 @@ impl UpdateStore {
                         Self::mark_update_applied(&update_id, &store_root);
 
                         // Clean up temp extraction folder
-                        println!("Cleaning up temp extraction folder: {}", temp_path);
+                        println!("Cleaning up temp extraction folder: {}", temp_path.display());
+                        let _ = fs::remove_dir_all(&temp_path);
+
+                        // Update completed successfully
+                        println!("Update applied successfully!");
+                        println!("  Active version: {:?}", app_dir);
+                        println!("  Rollback available: {:?}", rollback_dir);
+
+                        // Restart the app (path stays the same - still points to current_dir which now has new version)
+                        println!("Launching '{:?}'...", p);
+
+                        match local_command {
+                            None => {
+                                let _app = Command::new(&p)
+                                    .spawn()
+                                    .expect("Failed to start process");
+                            },
+                            Some(cmd) => {
+                                let _app = Command::new(cmd)
+                                    .arg(&p)
+                                    .spawn()
+                                    .expect("Failed to start process");
+                            },
+                        }
+
+                        return;
+                    }
+                }
+            }
+        });
+
+        Ok(1)
+    }
+
+    /// Apply an already-extracted update without tracking
+    ///
+    /// This method is for external applications that handle extraction themselves.
+    /// It assumes the update has already been extracted to temp_extract_path/app.
+    ///
+    /// # Arguments
+    /// * `app_path` - Path to the application binary
+    /// * `pid` - Process ID to wait for before applying
+    /// * `command` - Optional command to use for restart (e.g., "dotnet" for .NET apps)
+    pub async fn apply_extracted_update(&self, app_path: &PathBuf, pid: i32, command: &Option<String>) -> Result<u64, String> {
+        println!("APPLYING EXTRACTED UPDATE (no tracking)");
+
+        // Verify the extracted update exists
+        let update_temp_path = &self._settings.temp_extract_path;
+        let update_source_folder = update_temp_path.join("app");
+
+        if !update_source_folder.exists() {
+            let msg = format!("Extracted update not found at {:?}", update_source_folder);
+            eprintln!("ERROR: {}", msg);
+            return Err(msg);
+        }
+
+        if !update_source_folder.is_dir() {
+            let msg = format!("Update source is not a directory: {:?}", update_source_folder);
+            eprintln!("ERROR: {}", msg);
+            return Err(msg);
+        }
+
+        println!("Update source folder: {:?}", update_source_folder);
+
+        // Clone for thread
+        let p = app_path.clone();
+        let local_command = command.clone();
+        let timeout_seconds = self._settings.update_apply_timeout_seconds;
+        let temp_path = update_temp_path.clone();
+
+        thread::spawn(move || {
+            let application_folder = match p.parent().and_then(|p| p.to_str()) {
+                Some(folder) => folder,
+                None => {
+                    eprintln!("ERROR: Failed to get application folder from path");
+                    return;
+                }
+            };
+            let app = match p.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => {
+                    eprintln!("ERROR: Failed to get application name from path");
+                    return;
+                }
+            };
+            let proc_folder = format!("/proc/{}", pid);
+            let proc_path = Path::new(&proc_folder);
+
+            println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
+            println!("Waiting for process to exit (timeout: {} seconds)", timeout_seconds);
+
+            let start_time = std::time::Instant::now();
+            let mut last_warning = 0u64;
+
+            loop {
+                let elapsed_secs = start_time.elapsed().as_secs();
+
+                // Check for timeout
+                if elapsed_secs >= timeout_seconds {
+                    println!("ERROR: Timeout waiting for '{}' to exit after {} seconds", app, timeout_seconds);
+                    println!("Cleaning up temp extraction folder: {}", temp_path.display());
+                    let _ = fs::remove_dir_all(&temp_path);
+                    return;
+                }
+
+                // Log warnings at milestone intervals (1 min, 2 min, 3 min, 4 min)
+                let current_minute = elapsed_secs / 60;
+                if current_minute > last_warning && current_minute > 0 {
+                    println!("WARNING: Still waiting for '{}' to exit ({} minutes elapsed)", app, current_minute);
+                    last_warning = current_minute;
+                }
+
+                match proc_path.is_dir() {
+                    true => {
+                        sleep(Duration::from_millis(1000));
+                    },
+                    _ => {
+                        println!("'{}' exited after {} seconds", &app, start_time.elapsed().as_secs());
+
+                        // Get application directory
+                        let app_dir = match Self::get_app_directory(&p) {
+                            Ok(dir) => dir,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to get application directory: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
+
+                        println!("Application directory: {:?}", app_dir);
+
+                        // Get staging and rollback directory paths
+                        let (staging_dir, rollback_dir) = match Self::get_update_directories(&app_dir) {
+                            Ok(dirs) => dirs,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to get update directories: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
+
+                        println!("Staging directory: {:?}", staging_dir);
+                        println!("Rollback directory: {:?}", rollback_dir);
+
+                        // Clean up any existing staging directory
+                        if staging_dir.exists() {
+                            println!("Removing existing staging directory: {:?}", staging_dir);
+                            if let Err(e) = fs::remove_dir_all(&staging_dir) {
+                                eprintln!("ERROR: Failed to remove existing staging directory: {}", e);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        }
+
+                        // Create staging directory
+                        if let Err(e) = fs::create_dir_all(&staging_dir) {
+                            eprintln!("ERROR: Failed to create staging directory: {}", e);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
+
+                        // Copy new files from extracted package to staging directory
+                        println!("Copying new files from package to {:?}", staging_dir);
+                        let opts = fs_extra::dir::CopyOptions::new()
+                            .overwrite(true)
+                            .content_only(true);
+
+                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &staging_dir, &opts) {
+                            eprintln!("ERROR: Failed to copy new files: {}", e);
+                            eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                            let _ = fs::remove_dir_all(&staging_dir);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
+
+                        // Collect list of files in the package (for preservation logic)
+                        let new_files = match Self::collect_package_files(&update_source_folder) {
+                            Ok(files) => files,
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to collect package files: {}", e);
+                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        };
+
+                        println!("Package contains {} files", new_files.len());
+
+                        // Merge preserved files from current version
+                        println!("Merging preserved files from current version...");
+                        match Self::merge_preserved_files(&app_dir, &staging_dir, &new_files) {
+                            Ok(count) => {
+                                println!("Preserved {} files from current version", count);
+                            }
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to merge preserved files: {}", e);
+                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
+                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                                let _ = fs::remove_dir_all(&temp_path);
+                                return;
+                            }
+                        }
+
+                        // Perform atomic directory swap
+                        println!("Performing atomic directory swap...");
+                        if let Err(e) = Self::atomic_directory_swap(&app_dir, &staging_dir, &rollback_dir) {
+                            eprintln!("ERROR: Atomic swap failed: {}", e);
+                            eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
+                            let _ = fs::remove_dir_all(&temp_path);
+                            return;
+                        }
+
+                        // Note: No update tracking for this method (no mark_update_applied call)
+
+                        // Clean up temp extraction folder
+                        println!("Cleaning up temp extraction folder: {}", temp_path.display());
                         let _ = fs::remove_dir_all(&temp_path);
 
                         // Update completed successfully

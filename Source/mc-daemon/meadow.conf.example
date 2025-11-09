@@ -21,10 +21,21 @@ enabled yes
 # ============================================================================
 
 # Root directory for all Meadow daemon operations
-# All update storage will be under {meadow_root}/updates/
 # Default: /opt/meadow
 # Environment variable: MEADOW_ROOT (overrides this setting)
 meadow_root /opt/meadow
+
+# Path where update packages are stored after download
+# Downloaded MPAK files are stored in {update_store_path}/{mpak_id}/update.mpak
+# Default: /opt/meadow/update-store
+# Environment variable: UPDATE_STORE_PATH (overrides this setting)
+update_store_path /opt/meadow/update-store
+
+# Path where update packages are temporarily extracted before applying
+# Contents are deleted before each extraction
+# Default: /opt/meadow/update
+# Environment variable: TEMP_EXTRACT_PATH (overrides this setting)
+temp_extract_path /opt/meadow/update
 
 # ============================================================================
 # REST API SETTINGS
@@ -128,8 +139,10 @@ update_apply_timeout_seconds 300
 # ============================================================================
 #
 # Environment Variables:
-#   MEADOW_ROOT   - Overrides meadow_root setting
-#   MEADOW_CONFIG - Specifies config file location (default: /etc/meadow.conf)
+#   MEADOW_ROOT        - Overrides meadow_root setting
+#   UPDATE_STORE_PATH  - Overrides update_store_path setting
+#   TEMP_EXTRACT_PATH  - Overrides temp_extract_path setting
+#   MEADOW_CONFIG      - Specifies config file location (default: /etc/meadow.conf)
 #
 # REST API:
 #   The daemon listens on port 5000 for REST API calls

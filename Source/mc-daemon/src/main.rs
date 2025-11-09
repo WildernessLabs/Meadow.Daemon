@@ -27,6 +27,26 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // Ensure update_store_path directory exists
+    if !settings.update_store_path.exists() {
+        println!("Creating update store directory: {:?}", settings.update_store_path);
+        if let Err(e) = std::fs::create_dir_all(&settings.update_store_path) {
+            eprintln!("ERROR: Failed to create update_store_path directory: {}", e);
+            eprintln!("Please create the directory manually or set UPDATE_STORE_PATH to a writable location.");
+            return Err(e);
+        }
+    }
+
+    // Ensure temp_extract_path directory exists
+    if !settings.temp_extract_path.exists() {
+        println!("Creating temp extract directory: {:?}", settings.temp_extract_path);
+        if let Err(e) = std::fs::create_dir_all(&settings.temp_extract_path) {
+            eprintln!("ERROR: Failed to create temp_extract_path directory: {}", e);
+            eprintln!("Please create the directory manually or set TEMP_EXTRACT_PATH to a writable location.");
+            return Err(e);
+        }
+    }
+
     println!("Creating update store...");
     let update_store: Arc<Mutex<UpdateStore>> = Arc::new(Mutex::new(UpdateStore::new(settings.clone())));
 

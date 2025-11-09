@@ -157,6 +157,7 @@ impl RestServer {
                         .route("/updates", web::get().to(Self::get_updates))
                         .route("/updates/{id}", web::put().to(Self::update_action))
                         .route("/updates", web::delete().to(Self::clear_update_store))
+                        .route("/apply", web::put().to(Self::apply_extracted))
                         .route("/files", web::get().to(Self::list_files))
                         .route("/files/{path:.*}", web::get().to(Self::list_files))
                 )
@@ -303,6 +304,63 @@ impl RestServer {
         println!("  sending {} results...", result.len());
 
         Ok(HttpResponse::Ok().json(result))
+    }
+
+    async fn apply_extracted(
+        store: web::Data<Arc<Mutex<UpdateStore>>>,
+        data: web::Json<UpdateAction>)
+        -> impl Responder {
+
+        println!("REST APPLY EXTRACTED UPDATE");
+
+        let pid = match data.pid {
+            Some(p) if p > 0 => p,
+            _ => {
+                let msg = "PID is required and must be greater than 0";
+                println!("ERROR: {}", msg);
+                return HttpResponse::BadRequest().body(msg);
+            }
+        };
+
+        let app_path = match &data.app_dir {
+            None => {
+                // Try to get app path from /proc/{pid}/exe
+                match fs::read_link(format!("/proc/{}/exe", pid)) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        let msg = format!("Failed to determine application path from PID {}: {}", pid, e);
+                        println!("ERROR: {}", msg);
+                        return HttpResponse::BadRequest().body(msg);
+                    }
+                }
+            },
+            Some(p) => PathBuf::from(p)
+        };
+
+        println!("Applying update to: {:?}", app_path);
+        println!("Waiting for PID: {}", pid);
+        if let Some(ref cmd) = data.command {
+            println!("Restart command: {}", cmd);
+        }
+
+        match store.lock() {
+            Ok(s) => {
+                match s.apply_extracted_update(&app_path, pid, &data.command).await {
+                    Ok(_) => {
+                        println!("Apply operation started successfully");
+                        HttpResponse::Ok().body("Update apply started")
+                    },
+                    Err(msg) => {
+                        println!("ERROR: Failed to apply update: {}", msg);
+                        HttpResponse::InternalServerError().body(msg)
+                    }
+                }
+            },
+            Err(e) => {
+                eprintln!("ERROR: Failed to lock store: {}", e);
+                HttpResponse::InternalServerError().body("Failed to lock store")
+            }
+        }
     }
 
     async fn list_files(

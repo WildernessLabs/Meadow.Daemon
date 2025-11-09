@@ -6,6 +6,8 @@ use anyhow::{Context, Result};
 pub struct CloudSettings {
     pub enabled: bool,
     pub meadow_root: PathBuf,
+    pub update_store_path: PathBuf,
+    pub temp_extract_path: PathBuf,
     pub rest_api_bind_address: String,
     pub update_server_address: String,
     pub update_server_port: i32,
@@ -35,6 +37,8 @@ impl CloudSettings {
         CloudSettings{
             enabled: true,
             meadow_root: PathBuf::from("/opt/meadow"),
+            update_store_path: PathBuf::from("/opt/meadow/update-store"),
+            temp_extract_path: PathBuf::from("/opt/meadow/update"),
             rest_api_bind_address: "127.0.0.1".to_string(),  // Localhost only for security
             update_server_address: "".to_string(),
             update_server_port: 883,
@@ -105,6 +109,14 @@ impl CloudSettings {
                     "meadow_root" =>
                     {
                         settings.meadow_root = PathBuf::from(val);
+                    },
+                    "update_store_path" =>
+                    {
+                        settings.update_store_path = PathBuf::from(val);
+                    },
+                    "temp_extract_path" =>
+                    {
+                        settings.temp_extract_path = PathBuf::from(val);
                     },
                     "rest_api_bind_address" =>
                     {
@@ -195,6 +207,16 @@ impl CloudSettings {
         if let Ok(meadow_root) = std::env::var("MEADOW_ROOT") {
             println!("Using MEADOW_ROOT from environment: {}", meadow_root);
             settings.meadow_root = PathBuf::from(meadow_root);
+        }
+        // Check for UPDATE_STORE_PATH environment variable
+        if let Ok(update_store_path) = std::env::var("UPDATE_STORE_PATH") {
+            println!("Using UPDATE_STORE_PATH from environment: {}", update_store_path);
+            settings.update_store_path = PathBuf::from(update_store_path);
+        }
+        // Check for TEMP_EXTRACT_PATH environment variable
+        if let Ok(temp_extract_path) = std::env::var("TEMP_EXTRACT_PATH") {
+            println!("Using TEMP_EXTRACT_PATH from environment: {}", temp_extract_path);
+            settings.temp_extract_path = PathBuf::from(temp_extract_path);
         }
     }
 
