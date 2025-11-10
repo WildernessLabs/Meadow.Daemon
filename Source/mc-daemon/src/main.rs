@@ -27,6 +27,16 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // Ensure meadow_temp directory exists
+    if !settings.meadow_temp.exists() {
+        println!("Creating meadow temp directory: {:?}", settings.meadow_temp);
+        if let Err(e) = std::fs::create_dir_all(&settings.meadow_temp) {
+            eprintln!("ERROR: Failed to create meadow_temp directory: {}", e);
+            eprintln!("Please create the directory manually or set MEADOW_TEMP to a writable location.");
+            return Err(e);
+        }
+    }
+
     // Ensure update_store_path directory exists
     if !settings.update_store_path.exists() {
         println!("Creating update store directory: {:?}", settings.update_store_path);
@@ -43,6 +53,24 @@ async fn main() -> std::io::Result<()> {
         if let Err(e) = std::fs::create_dir_all(&settings.temp_extract_path) {
             eprintln!("ERROR: Failed to create temp_extract_path directory: {}", e);
             eprintln!("Please create the directory manually or set TEMP_EXTRACT_PATH to a writable location.");
+            return Err(e);
+        }
+    }
+
+    // Ensure staging_path directory exists
+    if !settings.staging_path.exists() {
+        println!("Creating staging directory: {:?}", settings.staging_path);
+        if let Err(e) = std::fs::create_dir_all(&settings.staging_path) {
+            eprintln!("ERROR: Failed to create staging_path directory: {}", e);
+            return Err(e);
+        }
+    }
+
+    // Ensure rollback_path directory exists
+    if !settings.rollback_path.exists() {
+        println!("Creating rollback directory: {:?}", settings.rollback_path);
+        if let Err(e) = std::fs::create_dir_all(&settings.rollback_path) {
+            eprintln!("ERROR: Failed to create rollback_path directory: {}", e);
             return Err(e);
         }
     }

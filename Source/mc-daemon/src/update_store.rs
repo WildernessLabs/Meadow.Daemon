@@ -196,27 +196,11 @@ impl UpdateStore {
         Ok(app_folder.to_path_buf())
     }
 
-    /// Get staging and rollback directory paths for the update
+    /// Get staging and rollback directory paths from settings
     ///
-    /// Examples:
-    /// - /home/user/myapp -> (/home/user/myapp-new, /home/user/myapp-rollback)
-    fn get_update_directories(app_dir: &Path) -> Result<(PathBuf, PathBuf), String> {
-        let parent = app_dir.parent();
-        let folder_name = app_dir.file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| "Failed to get folder name from path".to_string())?;
-
-        let staging_dir = match parent {
-            Some(p) => p.join(format!("{}-new", folder_name)),
-            None => PathBuf::from(format!("{}-new", folder_name)),
-        };
-
-        let rollback_dir = match parent {
-            Some(p) => p.join(format!("{}-rollback", folder_name)),
-            None => PathBuf::from(format!("{}-rollback", folder_name)),
-        };
-
-        Ok((staging_dir, rollback_dir))
+    /// Returns fixed paths from MEADOW_TEMP (e.g., /tmp/meadow/staging, /tmp/meadow/rollback)
+    fn get_update_directories(settings: &CloudSettings) -> (PathBuf, PathBuf) {
+        (settings.staging_path.clone(), settings.rollback_path.clone())
     }
 
     /// Collect all files in a package directory recursively
@@ -433,6 +417,7 @@ impl UpdateStore {
         let temp_path = update_temp_path.clone();
         let update_id = id.clone();
         let store_root = self.store_root_folder.clone();
+        let settings = self._settings.clone();
 
         thread::spawn(move || {
             let application_folder = match p.parent().and_then(|p| p.to_str()) {
@@ -500,16 +485,8 @@ impl UpdateStore {
 
                         println!("Application directory: {:?}", app_dir);
 
-                        // Get staging and rollback directory paths
-                        let (staging_dir, rollback_dir) = match Self::get_update_directories(&app_dir) {
-                            Ok(dirs) => dirs,
-                            Err(e) => {
-                                eprintln!("ERROR: Failed to get update directories: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
-                                let _ = fs::remove_dir_all(&temp_path);
-                                return;
-                            }
-                        };
+                        // Get staging and rollback directory paths from settings
+                        let (staging_dir, rollback_dir) = Self::get_update_directories(&settings);
 
                         println!("Staging directory: {:?}", staging_dir);
                         println!("Rollback directory: {:?}", rollback_dir);
@@ -661,6 +638,7 @@ impl UpdateStore {
         let local_command = command.clone();
         let timeout_seconds = self._settings.update_apply_timeout_seconds;
         let temp_path = update_temp_path.clone();
+        let settings = self._settings.clone();
 
         thread::spawn(move || {
             let application_folder = match p.parent().and_then(|p| p.to_str()) {
@@ -724,16 +702,8 @@ impl UpdateStore {
 
                         println!("Application directory: {:?}", app_dir);
 
-                        // Get staging and rollback directory paths
-                        let (staging_dir, rollback_dir) = match Self::get_update_directories(&app_dir) {
-                            Ok(dirs) => dirs,
-                            Err(e) => {
-                                eprintln!("ERROR: Failed to get update directories: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
-                                let _ = fs::remove_dir_all(&temp_path);
-                                return;
-                            }
-                        };
+                        // Get staging and rollback directory paths from settings
+                        let (staging_dir, rollback_dir) = Self::get_update_directories(&settings);
 
                         println!("Staging directory: {:?}", staging_dir);
                         println!("Rollback directory: {:?}", rollback_dir);

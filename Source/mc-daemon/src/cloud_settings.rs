@@ -6,8 +6,11 @@ use anyhow::{Context, Result};
 pub struct CloudSettings {
     pub enabled: bool,
     pub meadow_root: PathBuf,
+    pub meadow_temp: PathBuf,
     pub update_store_path: PathBuf,
     pub temp_extract_path: PathBuf,
+    pub staging_path: PathBuf,
+    pub rollback_path: PathBuf,
     pub rest_api_bind_address: String,
     pub update_server_address: String,
     pub update_server_port: i32,
@@ -34,11 +37,15 @@ impl CloudSettings {
     }
 
     pub fn default() -> CloudSettings {
+        let meadow_temp = PathBuf::from("/tmp/meadow");
         CloudSettings{
             enabled: true,
             meadow_root: PathBuf::from("/opt/meadow"),
-            update_store_path: PathBuf::from("/opt/meadow/update-store"),
-            temp_extract_path: PathBuf::from("/opt/meadow/update"),
+            meadow_temp: meadow_temp.clone(),
+            update_store_path: meadow_temp.join("updates"),
+            temp_extract_path: meadow_temp.join("update"),
+            staging_path: meadow_temp.join("staging"),
+            rollback_path: meadow_temp.join("rollback"),
             rest_api_bind_address: "127.0.0.1".to_string(),  // Localhost only for security
             update_server_address: "".to_string(),
             update_server_port: 883,
@@ -109,6 +116,16 @@ impl CloudSettings {
                     "meadow_root" =>
                     {
                         settings.meadow_root = PathBuf::from(val);
+                    },
+                    "meadow_temp" =>
+                    {
+                        let temp = PathBuf::from(val);
+                        settings.meadow_temp = temp.clone();
+                        // Recalculate derived paths
+                        settings.update_store_path = temp.join("updates");
+                        settings.temp_extract_path = temp.join("update");
+                        settings.staging_path = temp.join("staging");
+                        settings.rollback_path = temp.join("rollback");
                     },
                     "update_store_path" =>
                     {
@@ -208,12 +225,23 @@ impl CloudSettings {
             println!("Using MEADOW_ROOT from environment: {}", meadow_root);
             settings.meadow_root = PathBuf::from(meadow_root);
         }
-        // Check for UPDATE_STORE_PATH environment variable
+        // Check for MEADOW_TEMP environment variable
+        if let Ok(meadow_temp) = std::env::var("MEADOW_TEMP") {
+            println!("Using MEADOW_TEMP from environment: {}", meadow_temp);
+            let temp = PathBuf::from(meadow_temp);
+            settings.meadow_temp = temp.clone();
+            // Recalculate derived paths
+            settings.update_store_path = temp.join("updates");
+            settings.temp_extract_path = temp.join("update");
+            settings.staging_path = temp.join("staging");
+            settings.rollback_path = temp.join("rollback");
+        }
+        // Check for UPDATE_STORE_PATH environment variable (can override derived path)
         if let Ok(update_store_path) = std::env::var("UPDATE_STORE_PATH") {
             println!("Using UPDATE_STORE_PATH from environment: {}", update_store_path);
             settings.update_store_path = PathBuf::from(update_store_path);
         }
-        // Check for TEMP_EXTRACT_PATH environment variable
+        // Check for TEMP_EXTRACT_PATH environment variable (can override derived path)
         if let Ok(temp_extract_path) = std::env::var("TEMP_EXTRACT_PATH") {
             println!("Using TEMP_EXTRACT_PATH from environment: {}", temp_extract_path);
             settings.temp_extract_path = PathBuf::from(temp_extract_path);

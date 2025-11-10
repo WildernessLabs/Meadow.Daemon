@@ -20,22 +20,26 @@ enabled yes
 # PATH SETTINGS
 # ============================================================================
 
-# Root directory for all Meadow daemon operations
+# Root directory where the application runs from
+# Updates are applied to this directory
 # Default: /opt/meadow
 # Environment variable: MEADOW_ROOT (overrides this setting)
 meadow_root /opt/meadow
 
-# Path where update packages are stored after download
-# Downloaded MPAK files are stored in {update_store_path}/{mpak_id}/update.mpak
-# Default: /opt/meadow/update-store
-# Environment variable: UPDATE_STORE_PATH (overrides this setting)
-update_store_path /opt/meadow/update-store
-
-# Path where update packages are temporarily extracted before applying
-# Contents are deleted before each extraction
-# Default: /opt/meadow/update
-# Environment variable: TEMP_EXTRACT_PATH (overrides this setting)
-temp_extract_path /opt/meadow/update
+# Root directory for all temporary daemon operations
+# This setting controls where downloads, extractions, and staging occur
+# Default: /tmp/meadow
+# Environment variable: MEADOW_TEMP (overrides this setting)
+#
+# When you set meadow_temp, the following paths are automatically derived:
+#   - update_store_path: {meadow_temp}/updates     (MPAK storage)
+#   - temp_extract_path: {meadow_temp}/update      (MPAK extraction)
+#   - staging_path:      {meadow_temp}/staging     (Update staging)
+#   - rollback_path:     {meadow_temp}/rollback    (Update rollback)
+#
+# You can override individual paths if needed using UPDATE_STORE_PATH or
+# TEMP_EXTRACT_PATH environment variables.
+meadow_temp /tmp/meadow
 
 # ============================================================================
 # REST API SETTINGS
@@ -139,10 +143,22 @@ update_apply_timeout_seconds 300
 # ============================================================================
 #
 # Environment Variables:
-#   MEADOW_ROOT        - Overrides meadow_root setting
-#   UPDATE_STORE_PATH  - Overrides update_store_path setting
-#   TEMP_EXTRACT_PATH  - Overrides temp_extract_path setting
+#   MEADOW_ROOT        - Overrides meadow_root setting (where app runs)
+#   MEADOW_TEMP        - Overrides meadow_temp setting (temp operations root)
+#                        Setting this auto-derives: updates/, update/, staging/, rollback/
+#   UPDATE_STORE_PATH  - Overrides derived update_store_path
+#   TEMP_EXTRACT_PATH  - Overrides derived temp_extract_path
 #   MEADOW_CONFIG      - Specifies config file location (default: /etc/meadow.conf)
+#
+# Directory Structure:
+#   MEADOW_ROOT (default: /opt/meadow)
+#     └── Application files (where updates are applied)
+#
+#   MEADOW_TEMP (default: /tmp/meadow)
+#     ├── updates/       - Downloaded MPAK files organized by ID
+#     ├── update/        - Extracted MPAK contents before applying
+#     ├── staging/       - Staged files before atomic swap
+#     └── rollback/      - Backup of previous version
 #
 # REST API:
 #   The daemon listens on port 5000 for REST API calls

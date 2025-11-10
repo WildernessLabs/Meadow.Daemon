@@ -45,6 +45,13 @@ struct UpdateAction {
 }
 
 #[derive(Serialize, Deserialize)]
+struct ApplyAction {
+    pid: Option<i32>,
+    app_dir: Option<String>,
+    command: Option<String>
+}
+
+#[derive(Serialize, Deserialize)]
 struct FileInfo {
     name: String,
     #[serde(rename = "isDirectory")]
@@ -308,7 +315,7 @@ impl RestServer {
 
     async fn apply_extracted(
         store: web::Data<Arc<Mutex<UpdateStore>>>,
-        data: web::Json<UpdateAction>)
+        data: web::Json<ApplyAction>)
         -> impl Responder {
 
         println!("REST APPLY EXTRACTED UPDATE");
