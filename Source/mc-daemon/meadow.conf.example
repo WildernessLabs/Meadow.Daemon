@@ -154,6 +154,26 @@ connect_retry_seconds 15
 update_apply_timeout_seconds 300
 
 # ============================================================================
+# APPLICATION RESTART SETTINGS
+# ============================================================================
+
+# Is the application managed by systemd?
+# When set to 'yes', the daemon will use 'systemctl stop/start' to restart the app
+# This prevents race conditions where systemd auto-restarts the app during update
+# When set to 'no', the daemon will spawn the process directly after update
+# Values: yes, no
+# Default: no
+# Note: If 'yes', you must also specify app_service_name below
+app_is_systemd_service no
+
+# Systemd service name (required if app_is_systemd_service is 'yes')
+# The daemon will run 'systemctl stop <name>' before update and 'systemctl start <name>' after
+# Example: meadow-app.service
+# Default: (empty - must be set if app_is_systemd_service is 'yes')
+# Security: Daemon must have permission to control this service (may require sudo/polkit setup)
+#app_service_name meadow-app.service
+
+# ============================================================================
 # NOTES
 # ============================================================================
 #

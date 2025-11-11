@@ -24,6 +24,8 @@ pub struct CloudSettings {
     pub auth_max_retries: u32,
     pub ssh_key_path: PathBuf,
     pub auto_download_updates: bool,
+    pub app_is_systemd_service: bool,
+    pub app_service_name: Option<String>,
 }
 
 impl CloudSettings {
@@ -60,6 +62,8 @@ impl CloudSettings {
             auth_max_retries: 10,  // Max 10 authentication attempts before failing
             ssh_key_path: Self::get_default_ssh_key_path(),
             auto_download_updates: false,  // Disabled by default for backward compatibility
+            app_is_systemd_service: false,  // Direct process spawn by default
+            app_service_name: None,  // No service name by default
         }
     }
 
@@ -208,6 +212,16 @@ impl CloudSettings {
                     "auto_download_updates" =>
                     {
                         settings.auto_download_updates = val.to_lowercase() == "yes";
+                    },
+                    "app_is_systemd_service" =>
+                    {
+                        settings.app_is_systemd_service = val.to_lowercase() == "yes";
+                    },
+                    "app_service_name" =>
+                    {
+                        if !val.is_empty() {
+                            settings.app_service_name = Some(val.to_string());
+                        }
                     },
                     _ =>
                     {

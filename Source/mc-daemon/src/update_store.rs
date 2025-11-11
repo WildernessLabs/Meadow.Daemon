@@ -4,7 +4,7 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 use std::{collections::{HashMap, HashSet}, ops::Deref};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy, BufReader};
 use zip::ZipArchive;
@@ -546,6 +546,35 @@ impl UpdateStore {
             let proc_path = Path::new(&proc_folder);
 
             println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
+
+            // If app is managed by systemd, stop the service to prevent auto-restart
+            if settings.app_is_systemd_service {
+                if let Some(ref service_name) = settings.app_service_name {
+                    println!("Stopping systemd service '{}'...", service_name);
+                    match Command::new("systemctl")
+                        .arg("stop")
+                        .arg(service_name)
+                        .output() {
+                        Ok(output) => {
+                            if output.status.success() {
+                                println!("Successfully stopped service '{}'", service_name);
+                            } else {
+                                eprintln!("WARNING: Failed to stop service '{}': {}",
+                                    service_name,
+                                    String::from_utf8_lossy(&output.stderr));
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to execute systemctl stop: {}", e);
+                            eprintln!("Update may fail if systemd auto-restarts the service");
+                        }
+                    }
+                } else {
+                    eprintln!("ERROR: app_is_systemd_service is true but app_service_name is not set!");
+                    eprintln!("Update may fail if systemd auto-restarts the service");
+                }
+            }
+
             println!("Waiting for process to exit (timeout: {} seconds)", timeout_seconds);
 
             let start_time = std::time::Instant::now();
@@ -694,25 +723,57 @@ impl UpdateStore {
                         println!("  Active version: {:?}", app_dir);
                         println!("  Rollback available: {:?}", rollback_dir);
 
-                        // Restart the app (path stays the same - still points to current_dir which now has new version)
-                        println!("Launching '{:?}' in directory '{}'...", p, application_folder);
-
-                        match local_command {
-                            None => {
-                                let _app = Command::new(&p)
-                                    .current_dir(application_folder)
-                                    .process_group(0)
-                                    .spawn()
-                                    .expect("Failed to start process");
-                            },
-                            Some(cmd) => {
-                                let _app = Command::new(cmd)
-                                    .arg(&p)
-                                    .current_dir(application_folder)
-                                    .process_group(0)
-                                    .spawn()
-                                    .expect("Failed to start process");
-                            },
+                        // Restart the app
+                        if settings.app_is_systemd_service {
+                            // Restart via systemd
+                            if let Some(ref service_name) = settings.app_service_name {
+                                println!("Starting systemd service '{}'...", service_name);
+                                match Command::new("systemctl")
+                                    .arg("start")
+                                    .arg(service_name)
+                                    .output() {
+                                    Ok(output) => {
+                                        if output.status.success() {
+                                            println!("Successfully started service '{}'", service_name);
+                                        } else {
+                                            eprintln!("ERROR: Failed to start service '{}': {}",
+                                                service_name,
+                                                String::from_utf8_lossy(&output.stderr));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("ERROR: Failed to execute systemctl start: {}", e);
+                                    }
+                                }
+                            } else {
+                                eprintln!("ERROR: app_is_systemd_service is true but app_service_name is not set!");
+                            }
+                        } else {
+                            // Direct process spawn
+                            println!("Launching '{:?}' in directory '{}'...", p, application_folder);
+                            match local_command {
+                                None => {
+                                    let _app = Command::new(&p)
+                                        .current_dir(application_folder)
+                                        .stdin(Stdio::null())
+                                        .stdout(Stdio::null())
+                                        .stderr(Stdio::null())
+                                        .process_group(0)
+                                        .spawn()
+                                        .expect("Failed to start process");
+                                },
+                                Some(cmd) => {
+                                    let _app = Command::new(cmd)
+                                        .arg(&p)
+                                        .current_dir(application_folder)
+                                        .stdin(Stdio::null())
+                                        .stdout(Stdio::null())
+                                        .stderr(Stdio::null())
+                                        .process_group(0)
+                                        .spawn()
+                                        .expect("Failed to start process");
+                                },
+                            }
                         }
 
                         return;
@@ -773,6 +834,35 @@ impl UpdateStore {
             let proc_path = Path::new(&proc_folder);
 
             println!("Caller is '{}' (PID {}) running from '{}'", executable_name, pid, app_dir_str);
+
+            // If app is managed by systemd, stop the service to prevent auto-restart
+            if settings.app_is_systemd_service {
+                if let Some(ref service_name) = settings.app_service_name {
+                    println!("Stopping systemd service '{}'...", service_name);
+                    match Command::new("systemctl")
+                        .arg("stop")
+                        .arg(service_name)
+                        .output() {
+                        Ok(output) => {
+                            if output.status.success() {
+                                println!("Successfully stopped service '{}'", service_name);
+                            } else {
+                                eprintln!("WARNING: Failed to stop service '{}': {}",
+                                    service_name,
+                                    String::from_utf8_lossy(&output.stderr));
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("ERROR: Failed to execute systemctl stop: {}", e);
+                            eprintln!("Update may fail if systemd auto-restarts the service");
+                        }
+                    }
+                } else {
+                    eprintln!("ERROR: app_is_systemd_service is true but app_service_name is not set!");
+                    eprintln!("Update may fail if systemd auto-restarts the service");
+                }
+            }
+
             println!("Waiting for process to exit (timeout: {} seconds)", timeout_seconds);
 
             let start_time = std::time::Instant::now();
@@ -906,25 +996,57 @@ impl UpdateStore {
                         println!("  Active version: {:?}", app_dir_clone);
                         println!("  Rollback available: {:?}", rollback_dir);
 
-                        // Restart the app with executable path
-                        println!("Launching '{:?}' in directory '{:?}'...", executable_path_clone, app_dir_clone);
-
-                        match local_command {
-                            None => {
-                                let _app = Command::new(&executable_path_clone)
-                                    .current_dir(&app_dir_clone)
-                                    .process_group(0)
-                                    .spawn()
-                                    .expect("Failed to start process");
-                            },
-                            Some(cmd) => {
-                                let _app = Command::new(cmd)
-                                    .arg(&executable_path_clone)
-                                    .current_dir(&app_dir_clone)
-                                    .process_group(0)
-                                    .spawn()
-                                    .expect("Failed to start process");
-                            },
+                        // Restart the app
+                        if settings.app_is_systemd_service {
+                            // Restart via systemd
+                            if let Some(ref service_name) = settings.app_service_name {
+                                println!("Starting systemd service '{}'...", service_name);
+                                match Command::new("systemctl")
+                                    .arg("start")
+                                    .arg(service_name)
+                                    .output() {
+                                    Ok(output) => {
+                                        if output.status.success() {
+                                            println!("Successfully started service '{}'", service_name);
+                                        } else {
+                                            eprintln!("ERROR: Failed to start service '{}': {}",
+                                                service_name,
+                                                String::from_utf8_lossy(&output.stderr));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("ERROR: Failed to execute systemctl start: {}", e);
+                                    }
+                                }
+                            } else {
+                                eprintln!("ERROR: app_is_systemd_service is true but app_service_name is not set!");
+                            }
+                        } else {
+                            // Direct process spawn
+                            println!("Launching '{:?}' in directory '{:?}'...", executable_path_clone, app_dir_clone);
+                            match local_command {
+                                None => {
+                                    let _app = Command::new(&executable_path_clone)
+                                        .current_dir(&app_dir_clone)
+                                        .stdin(Stdio::null())
+                                        .stdout(Stdio::null())
+                                        .stderr(Stdio::null())
+                                        .process_group(0)
+                                        .spawn()
+                                        .expect("Failed to start process");
+                                },
+                                Some(cmd) => {
+                                    let _app = Command::new(cmd)
+                                        .arg(&executable_path_clone)
+                                        .current_dir(&app_dir_clone)
+                                        .stdin(Stdio::null())
+                                        .stdout(Stdio::null())
+                                        .stderr(Stdio::null())
+                                        .process_group(0)
+                                        .spawn()
+                                        .expect("Failed to start process");
+                                },
+                            }
                         }
 
                         return;
