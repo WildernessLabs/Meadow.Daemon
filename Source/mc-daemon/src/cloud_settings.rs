@@ -1,8 +1,9 @@
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
+use serde::Serialize;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct CloudSettings {
     pub enabled: bool,
     pub enable_mqtt_listener: bool,

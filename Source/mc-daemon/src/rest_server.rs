@@ -33,7 +33,8 @@ struct ServiceInfo {
     version: String,
     status: String,
     device_info: DeviceInfo,
-    public_key: String
+    public_key: String,
+    config: ConfigResponse
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +65,29 @@ struct FileInfo {
 struct FileListResponse {
     path: String,
     files: Vec<FileInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ConfigResponse {
+    enabled: bool,
+    enable_mqtt_listener: bool,
+    meadow_root: String,
+    meadow_temp: String,
+    update_store_path: String,
+    temp_extract_path: String,
+    staging_path: String,
+    rollback_path: String,
+    rest_api_bind_address: String,
+    update_server_address: String,
+    update_server_port: i32,
+    use_authentication: bool,
+    mqtt_topics: Vec<String>,
+    connect_retry_seconds: u64,
+    update_apply_timeout_seconds: u64,
+    auth_max_retries: u32,
+    auto_download_updates: bool,
+    app_is_systemd_service: bool,
+    app_service_name: Option<String>,
 }
 
 pub struct RestServer;
@@ -102,7 +126,7 @@ fn validate_and_resolve_path(
 }
 
 impl ServiceInfo {
-    pub fn new() -> ServiceInfo {
+    pub fn new(settings: &crate::cloud_settings::CloudSettings) -> ServiceInfo {
 
         let mut sn = match fs::read_to_string("/var/lib/dbus/machine-id") {
             Ok(id) => id.to_uppercase(),
@@ -114,7 +138,28 @@ impl ServiceInfo {
         trim_newline(&mut sn);
         let info = uname::uname().expect("CRITICAL: Failed to get system info via uname. This should never fail on a Linux system.");
 
-        // todo: should this be in a separate service, maybe?
+        // Build configuration response
+        let config = ConfigResponse {
+            enabled: settings.enabled,
+            enable_mqtt_listener: settings.enable_mqtt_listener,
+            meadow_root: settings.meadow_root.to_string_lossy().to_string(),
+            meadow_temp: settings.meadow_temp.to_string_lossy().to_string(),
+            update_store_path: settings.update_store_path.to_string_lossy().to_string(),
+            temp_extract_path: settings.temp_extract_path.to_string_lossy().to_string(),
+            staging_path: settings.staging_path.to_string_lossy().to_string(),
+            rollback_path: settings.rollback_path.to_string_lossy().to_string(),
+            rest_api_bind_address: settings.rest_api_bind_address.clone(),
+            update_server_address: settings.update_server_address.clone(),
+            update_server_port: settings.update_server_port,
+            use_authentication: settings.use_authentication,
+            mqtt_topics: settings.mqtt_topics.clone(),
+            connect_retry_seconds: settings.connect_retry_seconds,
+            update_apply_timeout_seconds: settings.update_apply_timeout_seconds,
+            auth_max_retries: settings.auth_max_retries,
+            auto_download_updates: settings.auto_download_updates,
+            app_is_systemd_service: settings.app_is_systemd_service,
+            app_service_name: settings.app_service_name.clone(),
+        };
 
         ServiceInfo {
             service: "Wilderness Labs Meadow.Daemon".to_string(),
@@ -126,8 +171,8 @@ impl ServiceInfo {
                 .as_secs(),
             version: "1.0".to_string(), // TODO: actually get this number
             status: "Running".to_string(),
-            device_info: DeviceInfo 
-            { 
+            device_info: DeviceInfo
+            {
                 serial_number: sn,
                 platform: "Meadow.Linux".to_string(), // TODO: pull from lscpu?
                 device_name: info.nodename,
@@ -141,7 +186,8 @@ impl ServiceInfo {
                 eprintln!("  Looked in ~/.ssh/id_rsa.pub (or /root/.ssh/id_rsa.pub)");
                 eprintln!("  You can configure the SSH key path in /etc/meadow.conf using the 'ssh_key_path' setting.");
                 "[No Public Key]".to_string()
-            })
+            }),
+            config
         }
     }
 }
@@ -193,8 +239,10 @@ impl RestServer {
         }
     }
 
-    async fn get_daemon_info() -> Result<HttpResponse, Error> {
-        Ok(HttpResponse::Ok().json(&ServiceInfo::new()))
+    async fn get_daemon_info(
+        settings: web::Data<crate::cloud_settings::CloudSettings>)
+        -> Result<HttpResponse, Error> {
+        Ok(HttpResponse::Ok().json(&ServiceInfo::new(&settings)))
     }
 
     async fn update_action(
