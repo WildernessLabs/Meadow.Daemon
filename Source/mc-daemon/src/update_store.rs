@@ -9,6 +9,9 @@ use std::fs::{self, OpenOptions, File};
 use std::io::{Write, Cursor, copy, BufReader};
 use zip::ZipArchive;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use crate::{cloud_settings::CloudSettings, update_descriptor::UpdateDescriptor};
 
 pub struct UpdateStore {
@@ -196,13 +199,6 @@ impl UpdateStore {
         Ok(app_folder.to_path_buf())
     }
 
-    /// Get staging and rollback directory paths from settings
-    ///
-    /// Returns fixed paths from MEADOW_TEMP (e.g., /tmp/meadow/staging, /tmp/meadow/rollback)
-    fn get_update_directories(settings: &CloudSettings) -> (PathBuf, PathBuf) {
-        (settings.staging_path.clone(), settings.rollback_path.clone())
-    }
-
     /// Collect all files in a package directory recursively
     /// Returns a HashSet of relative paths for quick lookup
     fn collect_package_files(package_dir: &Path) -> Result<HashSet<PathBuf>, String> {
@@ -306,12 +302,124 @@ impl UpdateStore {
         }
     }
 
+    /// Try atomic swap first, fallback to file-by-file if cross-device error
+    ///
+    /// This provides optimal performance when possible (atomic rename on same filesystem)
+    /// while automatically falling back to robust file-by-file operations when needed
+    fn swap_with_fallback(current: &Path, staging: &Path, rollback: &Path) -> Result<(), String> {
+        println!("Attempting atomic directory swap...");
+
+        match Self::atomic_directory_swap(current, staging, rollback) {
+            Ok(_) => {
+                println!("✓ Atomic swap succeeded");
+                Ok(())
+            }
+            Err(e) => {
+                // Check if it's a cross-device error
+                if e.contains("cross-device") || e.contains("Invalid cross-device link") {
+                    println!("⚠ Cross-device link detected, using file-by-file fallback");
+                    Self::file_by_file_swap(current, staging, rollback)
+                } else {
+                    // Other error, propagate it
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Perform file-by-file swap (fallback for cross-filesystem scenarios)
+    ///
+    /// 1. Move current -> rollback (file by file)
+    /// 2. Move staging -> current (file by file)
+    ///
+    /// This is slower than atomic rename but works across filesystems
+    fn file_by_file_swap(current: &Path, staging: &Path, rollback: &Path) -> Result<(), String> {
+        println!("FILE-BY-FILE SWAP: Using cross-filesystem fallback");
+
+        // Clean up old rollback if it exists
+        if rollback.exists() {
+            println!("  Removing old rollback directory: {:?}", rollback);
+            if let Err(e) = fs::remove_dir_all(rollback) {
+                return Err(format!("Failed to remove old rollback directory: {}", e));
+            }
+        }
+
+        // Create rollback directory
+        if let Err(e) = fs::create_dir_all(rollback) {
+            return Err(format!("Failed to create rollback directory: {}", e));
+        }
+
+        println!("OPERATION #1: Backing up current version (file-by-file)");
+        println!("  Copy: {:?} -> {:?}", current, rollback);
+
+        // Copy current version to rollback
+        let opts = fs_extra::dir::CopyOptions::new()
+            .overwrite(true)
+            .content_only(true);
+
+        if let Err(e) = fs_extra::dir::copy(current, rollback, &opts) {
+            return Err(format!("Failed to backup current version to rollback: {}", e));
+        }
+
+        println!("OPERATION #2: Removing current version");
+        // Remove all contents from current directory (but keep the directory itself)
+        match fs::read_dir(current) {
+            Ok(entries) => {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            if let Err(e) = fs::remove_dir_all(&path) {
+                                return Err(format!("Failed to remove directory {:?}: {}", path, e));
+                            }
+                        } else {
+                            if let Err(e) = fs::remove_file(&path) {
+                                return Err(format!("Failed to remove file {:?}: {}", path, e));
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(format!("Failed to read current directory: {}", e));
+            }
+        }
+
+        println!("OPERATION #3: Deploying new version (file-by-file)");
+        println!("  Copy: {:?} -> {:?}", staging, current);
+
+        // Copy staging to current
+        if let Err(e) = fs_extra::dir::copy(staging, current, &opts) {
+            // CRITICAL ERROR: Try to restore from rollback
+            eprintln!("ERROR: Failed to deploy new version: {}", e);
+            eprintln!("Attempting to restore from rollback...");
+
+            if let Err(restore_err) = fs_extra::dir::copy(rollback, current, &opts) {
+                return Err(format!(
+                    "CRITICAL: Failed to deploy new version AND failed to restore from rollback! \
+                    Original error: {}. Restore error: {}. \
+                    Rollback is at: {:?}",
+                    e, restore_err, rollback
+                ));
+            }
+
+            return Err(format!("Failed to deploy new version (restored from rollback): {}", e));
+        }
+
+        println!("File-by-file swap completed successfully");
+        println!("  New version active at: {:?}", current);
+        println!("  Rollback available at: {:?}", rollback);
+
+        Ok(())
+    }
+
     /// Perform atomic directory swap using two rename operations
     ///
     /// 1. rename(current, rollback) - backup current version
     /// 2. rename(new, current) - activate new version
     ///
     /// If any operation fails, attempts to restore from rollback
+    /// Returns Err with std::io::Error for cross-device detection
     fn atomic_directory_swap(current: &Path, new: &Path, rollback: &Path) -> Result<(), String> {
         println!("ATOMIC OPERATION #1: Backing up current version");
         println!("  Rename: {:?} -> {:?}", current, rollback);
@@ -485,41 +593,40 @@ impl UpdateStore {
 
                         println!("Application directory: {:?}", app_dir);
 
-                        // Get staging and rollback directory paths from settings
-                        let (staging_dir, rollback_dir) = Self::get_update_directories(&settings);
+                        // Use temp staging from settings as working area
+                        let temp_staging_dir = settings.staging_path.clone();
 
-                        println!("Staging directory: {:?}", staging_dir);
-                        println!("Rollback directory: {:?}", rollback_dir);
+                        println!("Temp staging directory: {:?}", temp_staging_dir);
 
-                        // Clean up any existing staging directory
-                        if staging_dir.exists() {
-                            println!("Removing existing staging directory: {:?}", staging_dir);
-                            if let Err(e) = fs::remove_dir_all(&staging_dir) {
-                                eprintln!("ERROR: Failed to remove existing staging directory: {}", e);
+                        // Clean up any existing temp staging directory
+                        if temp_staging_dir.exists() {
+                            println!("Removing existing temp staging directory: {:?}", temp_staging_dir);
+                            if let Err(e) = fs::remove_dir_all(&temp_staging_dir) {
+                                eprintln!("ERROR: Failed to remove existing temp staging directory: {}", e);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Create staging directory
-                        if let Err(e) = fs::create_dir_all(&staging_dir) {
-                            eprintln!("ERROR: Failed to create staging directory: {}", e);
+                        // Create temp staging directory
+                        if let Err(e) = fs::create_dir_all(&temp_staging_dir) {
+                            eprintln!("ERROR: Failed to create temp staging directory: {}", e);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
 
-                        // Copy new files from extracted package to staging directory
-                        println!("Copying new files from package to {:?}", staging_dir);
+                        // Copy new files from extracted package to temp staging directory
+                        println!("Copying new files from package to {:?}", temp_staging_dir);
                         let opts = fs_extra::dir::CopyOptions::new()
                             .overwrite(true)
                             .content_only(true);
 
-                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &staging_dir, &opts) {
+                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &temp_staging_dir, &opts) {
                             eprintln!("ERROR: Failed to copy new files: {}", e);
-                            eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                            let _ = fs::remove_dir_all(&staging_dir);
+                            eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                            let _ = fs::remove_dir_all(&temp_staging_dir);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
@@ -530,8 +637,8 @@ impl UpdateStore {
                             Ok(files) => files,
                             Err(e) => {
                                 eprintln!("ERROR: Failed to collect package files: {}", e);
-                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                                let _ = fs::remove_dir_all(&temp_staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
@@ -542,24 +649,30 @@ impl UpdateStore {
 
                         // Merge preserved files from current version
                         println!("Merging preserved files from current version...");
-                        match Self::merge_preserved_files(&app_dir, &staging_dir, &new_files) {
+                        match Self::merge_preserved_files(&app_dir, &temp_staging_dir, &new_files) {
                             Ok(count) => {
                                 println!("Preserved {} files from current version", count);
                             }
                             Err(e) => {
                                 eprintln!("ERROR: Failed to merge preserved files: {}", e);
-                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                                let _ = fs::remove_dir_all(&temp_staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Perform atomic directory swap
-                        println!("Performing atomic directory swap...");
-                        if let Err(e) = Self::atomic_directory_swap(&app_dir, &staging_dir, &rollback_dir) {
-                            eprintln!("ERROR: Atomic swap failed: {}", e);
+                        // Get rollback directory from settings (in temp)
+                        let rollback_dir = settings.rollback_path.clone();
+                        println!("Staging directory: {:?}", temp_staging_dir);
+                        println!("Rollback directory: {:?}", rollback_dir);
+
+                        // Perform directory swap (will use file-by-file for cross-filesystem)
+                        if let Err(e) = Self::swap_with_fallback(&app_dir, &temp_staging_dir, &rollback_dir) {
+                            eprintln!("ERROR: Directory swap failed: {}", e);
+                            eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                            let _ = fs::remove_dir_all(&temp_staging_dir);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
@@ -567,6 +680,10 @@ impl UpdateStore {
 
                         // Mark update as "applied" in descriptor
                         Self::mark_update_applied(&update_id, &store_root);
+
+                        // Clean up temp staging directory
+                        println!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                        let _ = fs::remove_dir_all(&temp_staging_dir);
 
                         // Clean up temp extraction folder
                         println!("Cleaning up temp extraction folder: {}", temp_path.display());
@@ -578,17 +695,21 @@ impl UpdateStore {
                         println!("  Rollback available: {:?}", rollback_dir);
 
                         // Restart the app (path stays the same - still points to current_dir which now has new version)
-                        println!("Launching '{:?}'...", p);
+                        println!("Launching '{:?}' in directory '{}'...", p, application_folder);
 
                         match local_command {
                             None => {
                                 let _app = Command::new(&p)
+                                    .current_dir(application_folder)
+                                    .process_group(0)
                                     .spawn()
                                     .expect("Failed to start process");
                             },
                             Some(cmd) => {
                                 let _app = Command::new(cmd)
                                     .arg(&p)
+                                    .current_dir(application_folder)
+                                    .process_group(0)
                                     .spawn()
                                     .expect("Failed to start process");
                             },
@@ -609,10 +730,11 @@ impl UpdateStore {
     /// It assumes the update has already been extracted to temp_extract_path/app.
     ///
     /// # Arguments
-    /// * `app_path` - Path to the application binary
+    /// * `app_dir` - Application directory where update will be applied
+    /// * `executable_path` - Full path to executable/DLL for restart (can be relative to app_dir)
     /// * `pid` - Process ID to wait for before applying
     /// * `command` - Optional command to use for restart (e.g., "dotnet" for .NET apps)
-    pub async fn apply_extracted_update(&self, app_path: &PathBuf, pid: i32, command: &Option<String>) -> Result<u64, String> {
+    pub async fn apply_extracted_update(&self, app_dir: &PathBuf, executable_path: &PathBuf, pid: i32, command: &Option<String>) -> Result<u64, String> {
         println!("APPLYING EXTRACTED UPDATE (no tracking)");
 
         // Verify the extracted update exists
@@ -634,31 +756,23 @@ impl UpdateStore {
         println!("Update source folder: {:?}", update_source_folder);
 
         // Clone for thread
-        let p = app_path.clone();
+        let app_dir_clone = app_dir.clone();
+        let executable_path_clone = executable_path.clone();
         let local_command = command.clone();
         let timeout_seconds = self._settings.update_apply_timeout_seconds;
         let temp_path = update_temp_path.clone();
         let settings = self._settings.clone();
 
         thread::spawn(move || {
-            let application_folder = match p.parent().and_then(|p| p.to_str()) {
-                Some(folder) => folder,
-                None => {
-                    eprintln!("ERROR: Failed to get application folder from path");
-                    return;
-                }
-            };
-            let app = match p.file_name().and_then(|n| n.to_str()) {
-                Some(name) => name,
-                None => {
-                    eprintln!("ERROR: Failed to get application name from path");
-                    return;
-                }
-            };
+            let app_dir_str = app_dir_clone.to_string_lossy().to_string();
+            let executable_name = executable_path_clone.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+
             let proc_folder = format!("/proc/{}", pid);
             let proc_path = Path::new(&proc_folder);
 
-            println!("Caller is '{}' (PID {}) running from '{}'", app, pid, application_folder);
+            println!("Caller is '{}' (PID {}) running from '{}'", executable_name, pid, app_dir_str);
             println!("Waiting for process to exit (timeout: {} seconds)", timeout_seconds);
 
             let start_time = std::time::Instant::now();
@@ -669,7 +783,7 @@ impl UpdateStore {
 
                 // Check for timeout
                 if elapsed_secs >= timeout_seconds {
-                    println!("ERROR: Timeout waiting for '{}' to exit after {} seconds", app, timeout_seconds);
+                    println!("ERROR: Timeout waiting for '{}' to exit after {} seconds", executable_name, timeout_seconds);
                     println!("Cleaning up temp extraction folder: {}", temp_path.display());
                     let _ = fs::remove_dir_all(&temp_path);
                     return;
@@ -678,7 +792,7 @@ impl UpdateStore {
                 // Log warnings at milestone intervals (1 min, 2 min, 3 min, 4 min)
                 let current_minute = elapsed_secs / 60;
                 if current_minute > last_warning && current_minute > 0 {
-                    println!("WARNING: Still waiting for '{}' to exit ({} minutes elapsed)", app, current_minute);
+                    println!("WARNING: Still waiting for '{}' to exit ({} minutes elapsed)", executable_name, current_minute);
                     last_warning = current_minute;
                 }
 
@@ -687,56 +801,45 @@ impl UpdateStore {
                         sleep(Duration::from_millis(1000));
                     },
                     _ => {
-                        println!("'{}' exited after {} seconds", &app, start_time.elapsed().as_secs());
+                        println!("'{}' exited after {} seconds", executable_name, start_time.elapsed().as_secs());
 
-                        // Get application directory
-                        let app_dir = match Self::get_app_directory(&p) {
-                            Ok(dir) => dir,
-                            Err(e) => {
-                                eprintln!("ERROR: Failed to get application directory: {}", e);
-                                eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
-                                let _ = fs::remove_dir_all(&temp_path);
-                                return;
-                            }
-                        };
+                        // Use the app_dir that was provided
+                        println!("Application directory: {:?}", app_dir_clone);
 
-                        println!("Application directory: {:?}", app_dir);
+                        // Use temp staging from settings as working area
+                        let temp_staging_dir = settings.staging_path.clone();
 
-                        // Get staging and rollback directory paths from settings
-                        let (staging_dir, rollback_dir) = Self::get_update_directories(&settings);
+                        println!("Temp staging directory: {:?}", temp_staging_dir);
 
-                        println!("Staging directory: {:?}", staging_dir);
-                        println!("Rollback directory: {:?}", rollback_dir);
-
-                        // Clean up any existing staging directory
-                        if staging_dir.exists() {
-                            println!("Removing existing staging directory: {:?}", staging_dir);
-                            if let Err(e) = fs::remove_dir_all(&staging_dir) {
-                                eprintln!("ERROR: Failed to remove existing staging directory: {}", e);
+                        // Clean up any existing temp staging directory
+                        if temp_staging_dir.exists() {
+                            println!("Removing existing temp staging directory: {:?}", temp_staging_dir);
+                            if let Err(e) = fs::remove_dir_all(&temp_staging_dir) {
+                                eprintln!("ERROR: Failed to remove existing temp staging directory: {}", e);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Create staging directory
-                        if let Err(e) = fs::create_dir_all(&staging_dir) {
-                            eprintln!("ERROR: Failed to create staging directory: {}", e);
+                        // Create temp staging directory
+                        if let Err(e) = fs::create_dir_all(&temp_staging_dir) {
+                            eprintln!("ERROR: Failed to create temp staging directory: {}", e);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
 
-                        // Copy new files from extracted package to staging directory
-                        println!("Copying new files from package to {:?}", staging_dir);
+                        // Copy new files from extracted package to temp staging directory
+                        println!("Copying new files from package to {:?}", temp_staging_dir);
                         let opts = fs_extra::dir::CopyOptions::new()
                             .overwrite(true)
                             .content_only(true);
 
-                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &staging_dir, &opts) {
+                        if let Err(e) = fs_extra::dir::copy(&update_source_folder, &temp_staging_dir, &opts) {
                             eprintln!("ERROR: Failed to copy new files: {}", e);
-                            eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                            let _ = fs::remove_dir_all(&staging_dir);
+                            eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                            let _ = fs::remove_dir_all(&temp_staging_dir);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
@@ -747,8 +850,8 @@ impl UpdateStore {
                             Ok(files) => files,
                             Err(e) => {
                                 eprintln!("ERROR: Failed to collect package files: {}", e);
-                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                                let _ = fs::remove_dir_all(&temp_staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
@@ -759,28 +862,38 @@ impl UpdateStore {
 
                         // Merge preserved files from current version
                         println!("Merging preserved files from current version...");
-                        match Self::merge_preserved_files(&app_dir, &staging_dir, &new_files) {
+                        match Self::merge_preserved_files(&app_dir_clone, &temp_staging_dir, &new_files) {
                             Ok(count) => {
                                 println!("Preserved {} files from current version", count);
                             }
                             Err(e) => {
                                 eprintln!("ERROR: Failed to merge preserved files: {}", e);
-                                eprintln!("Cleaning up staging directory: {:?}", staging_dir);
-                                let _ = fs::remove_dir_all(&staging_dir);
+                                eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                                let _ = fs::remove_dir_all(&temp_staging_dir);
                                 eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                                 let _ = fs::remove_dir_all(&temp_path);
                                 return;
                             }
                         }
 
-                        // Perform atomic directory swap
-                        println!("Performing atomic directory swap...");
-                        if let Err(e) = Self::atomic_directory_swap(&app_dir, &staging_dir, &rollback_dir) {
-                            eprintln!("ERROR: Atomic swap failed: {}", e);
+                        // Get rollback directory from settings (in temp)
+                        let rollback_dir = settings.rollback_path.clone();
+                        println!("Staging directory: {:?}", temp_staging_dir);
+                        println!("Rollback directory: {:?}", rollback_dir);
+
+                        // Perform directory swap (will use file-by-file for cross-filesystem)
+                        if let Err(e) = Self::swap_with_fallback(&app_dir_clone, &temp_staging_dir, &rollback_dir) {
+                            eprintln!("ERROR: Directory swap failed: {}", e);
+                            eprintln!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                            let _ = fs::remove_dir_all(&temp_staging_dir);
                             eprintln!("Cleaning up temp extraction folder: {}", temp_path.display());
                             let _ = fs::remove_dir_all(&temp_path);
                             return;
                         }
+
+                        // Clean up temp staging directory
+                        println!("Cleaning up temp staging directory: {:?}", temp_staging_dir);
+                        let _ = fs::remove_dir_all(&temp_staging_dir);
 
                         // Note: No update tracking for this method (no mark_update_applied call)
 
@@ -790,21 +903,25 @@ impl UpdateStore {
 
                         // Update completed successfully
                         println!("Update applied successfully!");
-                        println!("  Active version: {:?}", app_dir);
+                        println!("  Active version: {:?}", app_dir_clone);
                         println!("  Rollback available: {:?}", rollback_dir);
 
-                        // Restart the app (path stays the same - still points to current_dir which now has new version)
-                        println!("Launching '{:?}'...", p);
+                        // Restart the app with executable path
+                        println!("Launching '{:?}' in directory '{:?}'...", executable_path_clone, app_dir_clone);
 
                         match local_command {
                             None => {
-                                let _app = Command::new(&p)
+                                let _app = Command::new(&executable_path_clone)
+                                    .current_dir(&app_dir_clone)
+                                    .process_group(0)
                                     .spawn()
                                     .expect("Failed to start process");
                             },
                             Some(cmd) => {
                                 let _app = Command::new(cmd)
-                                    .arg(&p)
+                                    .arg(&executable_path_clone)
+                                    .current_dir(&app_dir_clone)
+                                    .process_group(0)
                                     .spawn()
                                     .expect("Failed to start process");
                             },

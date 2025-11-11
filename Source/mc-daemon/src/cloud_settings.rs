@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 #[derive(Clone)]
 pub struct CloudSettings {
     pub enabled: bool,
+    pub enable_mqtt_listener: bool,
     pub meadow_root: PathBuf,
     pub meadow_temp: PathBuf,
     pub update_store_path: PathBuf,
@@ -40,6 +41,7 @@ impl CloudSettings {
         let meadow_temp = PathBuf::from("/tmp/meadow");
         CloudSettings{
             enabled: true,
+            enable_mqtt_listener: true,  // Enabled by default for backward compatibility
             meadow_root: PathBuf::from("/opt/meadow"),
             meadow_temp: meadow_temp.clone(),
             update_store_path: meadow_temp.join("updates"),
@@ -112,6 +114,10 @@ impl CloudSettings {
                     "enabled" =>
                     {
                         settings.enabled = val.to_lowercase() == "yes";
+                    },
+                    "enable_mqtt_listener" =>
+                    {
+                        settings.enable_mqtt_listener = val.to_lowercase() == "yes";
                     },
                     "meadow_root" =>
                     {

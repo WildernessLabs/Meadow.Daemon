@@ -16,6 +16,21 @@
 # Default: yes
 enabled yes
 
+# Enable or disable the MQTT listener for cloud-based update notifications
+# When set to 'yes', the daemon will:
+#   - Connect to the MQTT broker
+#   - Subscribe to update topics
+#   - Receive and store update notifications
+#   - Optionally auto-download updates (if auto_download_updates is enabled)
+# When set to 'no', the daemon will:
+#   - Only run the REST API server
+#   - Rely on external applications to handle MQTT subscriptions and downloads
+#   - Still provide update apply functionality via REST API
+# Values: yes, no
+# Default: yes (for backward compatibility)
+# Use case: Set to 'no' if you have a separate application managing update notifications
+enable_mqtt_listener yes
+
 # ============================================================================
 # PATH SETTINGS
 # ============================================================================
@@ -161,12 +176,24 @@ update_apply_timeout_seconds 300
 #     └── rollback/      - Backup of previous version
 #
 # REST API:
-#   The daemon listens on port 5000 for REST API calls
+#   The daemon always runs a REST API server on port 5000 (regardless of enable_mqtt_listener)
 #   Endpoints:
 #     GET  /api/info              - Get daemon information
 #     GET  /api/updates           - List available updates
 #     PUT  /api/updates/{id}      - Download or apply update
+#     PUT  /api/apply             - Apply already-extracted update
 #     DELETE /api/updates         - Clear update store
+#     GET  /api/files[/{path}]    - List files in meadow_root
+#
+# Operating Modes:
+#   1. Full mode (enable_mqtt_listener=yes):
+#      - Daemon handles MQTT subscriptions, downloads, and applies updates
+#      - REST API available for external control and monitoring
+#
+#   2. REST-only mode (enable_mqtt_listener=no):
+#      - External application handles MQTT subscriptions and downloads
+#      - Daemon provides REST API for applying updates and file operations
+#      - Use PUT /api/apply after extracting updates to temp_extract_path
 #
 # For more information, see:
 #   https://github.com/WildernessLabs/Meadow.Daemon

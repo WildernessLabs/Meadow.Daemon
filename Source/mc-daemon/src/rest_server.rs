@@ -48,6 +48,7 @@ struct UpdateAction {
 struct ApplyAction {
     pid: Option<i32>,
     app_dir: Option<String>,
+    executable: Option<String>,
     command: Option<String>
 }
 
@@ -329,11 +330,22 @@ impl RestServer {
             }
         };
 
-        let app_path = match &data.app_dir {
+        // Determine application directory and executable path
+        let (app_dir, executable_path) = match &data.app_dir {
             None => {
-                // Try to get app path from /proc/{pid}/exe
+                // Auto-detect from /proc/{pid}/exe
                 match fs::read_link(format!("/proc/{}/exe", pid)) {
-                    Ok(path) => path,
+                    Ok(exe_path) => {
+                        let dir = match exe_path.parent() {
+                            Some(parent) => parent.to_path_buf(),
+                            None => {
+                                let msg = format!("Failed to get directory from executable path: {:?}", exe_path);
+                                println!("ERROR: {}", msg);
+                                return HttpResponse::BadRequest().body(msg);
+                            }
+                        };
+                        (dir, exe_path)
+                    },
                     Err(e) => {
                         let msg = format!("Failed to determine application path from PID {}: {}", pid, e);
                         println!("ERROR: {}", msg);
@@ -341,10 +353,27 @@ impl RestServer {
                     }
                 }
             },
-            Some(p) => PathBuf::from(p)
+            Some(dir_str) => {
+                // Use provided app_dir as the application directory
+                let dir = PathBuf::from(dir_str.trim_end_matches('/'));
+
+                // Construct executable path from app_dir + executable
+                let executable = match &data.executable {
+                    Some(exe) => exe,
+                    None => {
+                        let msg = "executable is required when app_dir is provided";
+                        println!("ERROR: {}", msg);
+                        return HttpResponse::BadRequest().body(msg);
+                    }
+                };
+
+                let exe_path = dir.join(executable);
+                (dir, exe_path)
+            }
         };
 
-        println!("Applying update to: {:?}", app_path);
+        println!("Application directory: {:?}", app_dir);
+        println!("Executable path: {:?}", executable_path);
         println!("Waiting for PID: {}", pid);
         if let Some(ref cmd) = data.command {
             println!("Restart command: {}", cmd);
@@ -352,7 +381,7 @@ impl RestServer {
 
         match store.lock() {
             Ok(s) => {
-                match s.apply_extracted_update(&app_path, pid, &data.command).await {
+                match s.apply_extracted_update(&app_dir, &executable_path, pid, &data.command).await {
                     Ok(_) => {
                         println!("Apply operation started successfully");
                         HttpResponse::Ok().body("Update apply started")
