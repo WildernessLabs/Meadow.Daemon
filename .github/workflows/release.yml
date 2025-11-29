@@ -1,0 +1,69 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*'
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    name: Build binaries and create release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build AMD64 binary
+        run: |
+          cd Source/mc-daemon
+          cargo build --release --target x86_64-unknown-linux-gnu
+          strip target/x86_64-unknown-linux-gnu/release/mc-daemon
+          cp target/x86_64-unknown-linux-gnu/release/mc-daemon ../../mc-daemon-amd64
+          ls -lh ../../mc-daemon-amd64
+
+      - name: Build ARM64 binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cd Source/mc-daemon
+          cargo build --release --target aarch64-unknown-linux-gnu
+          aarch64-linux-gnu-strip target/aarch64-unknown-linux-gnu/release/mc-daemon
+          cp target/aarch64-unknown-linux-gnu/release/mc-daemon ../../mc-daemon-arm64
+          ls -lh ../../mc-daemon-arm64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: mc-daemon ${{ steps.version.outputs.version }}
+          files: |
+            mc-daemon-amd64
+            mc-daemon-arm64
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
