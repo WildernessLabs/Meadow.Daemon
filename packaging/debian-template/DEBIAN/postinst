@@ -1,0 +1,51 @@
+#!/bin/bash
+set -e
+
+# Create required directories with appropriate permissions
+mkdir -p /opt/meadow
+mkdir -p /tmp/meadow/{updates,update,staging,rollback}
+chmod 755 /opt/meadow
+chmod 755 /tmp/meadow
+chmod 755 /tmp/meadow/{updates,update,staging,rollback}
+
+# Ensure configuration file has correct permissions
+chmod 644 /etc/meadow.conf
+
+# Generate SSH keys if they don't exist (for root user)
+if [ ! -f /root/.ssh/id_rsa ]; then
+    echo "Generating SSH key pair for mc-daemon..."
+    mkdir -p /root/.ssh
+    ssh-keygen -t rsa -b 4096 -N "" -f /root/.ssh/id_rsa -C "mc-daemon@$(hostname)"
+    chmod 600 /root/.ssh/id_rsa
+    chmod 644 /root/.ssh/id_rsa.pub
+fi
+
+# Reload systemd daemon to recognize new service
+systemctl daemon-reload
+
+# Enable service to start on boot
+systemctl enable mc-daemon.service
+
+# Start the service
+systemctl start mc-daemon.service
+
+# Display status
+echo ""
+echo "===================================================="
+echo "Meadow Daemon installation complete!"
+echo "===================================================="
+echo ""
+echo "Service status:"
+systemctl status mc-daemon.service --no-pager || true
+echo ""
+echo "Configuration file: /etc/meadow.conf"
+echo "Binary location: /usr/bin/mc-daemon"
+echo "Service logs: journalctl -u mc-daemon.service -f"
+echo ""
+echo "Next steps:"
+echo "1. Review /etc/meadow.conf and adjust settings if needed"
+echo "2. If using Meadow.Cloud, ensure /root/.ssh/id_rsa.pub is registered"
+echo "3. Restart service after config changes: systemctl restart mc-daemon"
+echo ""
+
+exit 0

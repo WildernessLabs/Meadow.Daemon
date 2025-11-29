@@ -1,0 +1,18 @@
+Package: mc-daemon
+Version: 0.9.0
+Section: net
+Priority: optional
+Architecture: ARCHITECTURE_PLACEHOLDER
+Maintainer: Wilderness Labs <support@wildernesslabs.co>
+Depends: systemd, openssh-client
+Description: Meadow Daemon - Linux service for OTA updates and Meadow.Cloud connectivity
+ Meadow.Daemon is a Rust-based service that provides client connectivity and
+ Over-The-Air (OTA) update functionality for applications in the Meadow ecosystem.
+ .
+ Features:
+  - REST API on port 5000 for application interaction
+  - MQTT-based cloud connectivity for update notifications
+  - Secure authentication with Meadow.Cloud using RSA/AES encryption
+  - Local update management and application
+  - Systemd service integration
+Homepage: https://github.com/WildernessLabs/Meadow.Daemon

@@ -3,3 +3,8 @@ target/
 .vs/
 obj/
 Cargo.lock
+
+# Packaging build artifacts
+packaging/build/
+packaging/gh-pages-repo/
+*.deb

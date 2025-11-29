@@ -53,7 +53,7 @@ impl CloudSettings {
             rollback_path: meadow_temp.join("rollback"),
             rest_api_bind_address: "127.0.0.1".to_string(),  // Localhost only for security
             update_server_address: "".to_string(),
-            update_server_port: 883,
+            update_server_port: 1883,
             use_authentication: true,
             auth_server_address: Some("https://www.meadowcloud.co".to_string()),
             auth_server_port: None,

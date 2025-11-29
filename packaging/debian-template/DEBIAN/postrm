@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+# Only perform cleanup on purge (not on upgrade or remove)
+if [ "$1" = "purge" ]; then
+    echo "Purging mc-daemon data..."
+
+    # Remove temporary directories
+    rm -rf /tmp/meadow
+
+    # Optionally remove /opt/meadow (ask user or leave for safety)
+    # Note: We don't remove SSH keys as they may be used for other purposes
+
+    echo "Temporary data removed. Application data in /opt/meadow preserved."
+fi
+
+# Reload systemd to forget about the service
+systemctl daemon-reload || true
+
+exit 0
