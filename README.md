@@ -8,6 +8,8 @@ Add repository:
 
 Currently this package is not GPG signed (we're working that direction) so you must set the `trusted` param.
 
+To install on your Debian-based machine: 
+
 ```bash
 echo "deb [trusted=yes] https://wildernesslabs.github.io/Meadow.Daemon/apt stable main" | sudo tee /etc/apt/sources.list.d/meadow-daemon.list
 sudo apt update
