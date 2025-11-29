@@ -8,6 +8,9 @@ DAEMON_DIR="$REPO_ROOT/Source/mc-daemon"
 TEMPLATE_DIR="$SCRIPT_DIR/debian-template"
 BUILD_DIR="$SCRIPT_DIR/build"
 
+# Linux-native staging root (guaranteed ext4 under WSL)
+STAGING_ROOT="/tmp/mc-daemon-deb-staging"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -52,18 +55,19 @@ echo -e "${GREEN}Building mc-daemon version $VERSION${NC}"
 if [ "$CLEAN_BUILD" = true ]; then
     echo -e "${YELLOW}Cleaning previous builds...${NC}"
     rm -rf "$BUILD_DIR"
+    rm -rf "$STAGING_ROOT"
     cd "$DAEMON_DIR"
     cargo clean
 fi
 
-# Create build directory
+# Create build directories
 mkdir -p "$BUILD_DIR"
+mkdir -p "$STAGING_ROOT"
 
 # Build function
 build_for_arch() {
     local ARCH=$1
     local RUST_TARGET=""
-    local CARGO_TARGET=""
 
     echo ""
     echo -e "${GREEN}========================================${NC}"
@@ -108,13 +112,14 @@ build_for_arch() {
 
     cargo build --release --target $RUST_TARGET
 
-    # Create package directory structure
+    # Staging/package directories
+    # PACKAGE_DIR on (possibly Windows) script dir, for your reference
     PACKAGE_DIR="$BUILD_DIR/mc-daemon-${VERSION}-${ARCH}"
-    echo "Creating package structure in $PACKAGE_DIR..."
+    echo "Preparing package directory (source) in $PACKAGE_DIR..."
     rm -rf "$PACKAGE_DIR"
     mkdir -p "$PACKAGE_DIR"
 
-    # Copy template structure
+    # Copy template structure to PACKAGE_DIR
     cp -r "$TEMPLATE_DIR"/* "$PACKAGE_DIR/"
 
     # Copy binary
@@ -134,15 +139,26 @@ build_for_arch() {
     sed -i "s/ARCHITECTURE_PLACEHOLDER/$ARCH/g" "$PACKAGE_DIR/DEBIAN/control"
     sed -i "s/Version: .*/Version: $VERSION/g" "$PACKAGE_DIR/DEBIAN/control"
 
-    # Ensure scripts are executable
-    chmod 755 "$PACKAGE_DIR/DEBIAN/postinst"
-    chmod 755 "$PACKAGE_DIR/DEBIAN/prerm"
-    chmod 755 "$PACKAGE_DIR/DEBIAN/postrm"
+    # Now create a Linux-native staging copy under /tmp
+    STAGING_DIR="$STAGING_ROOT/mc-daemon-${VERSION}-${ARCH}"
+    echo "Creating Linux-native staging directory in $STAGING_DIR..."
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
 
-    # Create .deb package
+    # rsync or cp -a to preserve modes; either is fine on ext4
+    # Using cp -a to keep it simple:
+    cp -a "$PACKAGE_DIR/." "$STAGING_DIR/"
+
+    # Ensure directory and DEBIAN scripts have correct permissions in staging
+    chmod 755 "$STAGING_DIR"
+    chmod 755 "$STAGING_DIR/DEBIAN"
+    find "$STAGING_DIR/DEBIAN" -type f -exec chmod 755 {} \;
+
+    # Create .deb package from the staging dir (Linux-native)
     DEB_FILE="$BUILD_DIR/mc-daemon_${VERSION}_${ARCH}.deb"
-    echo "Building .deb package..."
-    dpkg-deb --build "$PACKAGE_DIR" "$DEB_FILE"
+    echo "Building .deb package from staging dir..."
+    echo "dpkg-deb --build \"$STAGING_DIR\" \"$DEB_FILE\""
+    dpkg-deb --build "$STAGING_DIR" "$DEB_FILE"
 
     # Verify package
     echo ""
