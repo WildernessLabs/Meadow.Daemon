@@ -1,0 +1,186 @@
+# Meadow.Daemon Configuration
+# Location: /etc/meadow.conf
+#
+# This file configures mc-daemon for use with .NET applications using Meadow.Core.
+# When using Meadow.Core, the application handles MQTT connections and update downloads.
+# The daemon's role is limited to file management and app restart.
+#
+# Configuration Format:
+#   key value
+#   (no = sign between key and value)
+#
+# Comments start with #
+
+# =============================================================================
+# Cloud Connectivity
+# =============================================================================
+
+# Enable cloud connection (required for OTA updates)
+enabled yes
+
+# Disable MQTT listener - Meadow.Core in your app handles MQTT
+# Set to 'yes' only if daemon should handle MQTT (standalone mode)
+enable_mqtt_listener no
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+# Application deployment directory
+# This is where your app runs and where updates are applied
+# Default: /opt/meadow
+meadow_root /opt/meadow
+
+# Temporary directory for downloads and staging
+# IMPORTANT: Use a user-owned directory if your app runs as non-root
+# Examples:
+#   - /home/USERNAME/.meadow/tmp  (for user-owned apps)
+#   - /tmp/meadow                  (only if app runs as root)
+# Default: /tmp/meadow
+meadow_temp /home/USERNAME/.meadow/tmp
+
+# =============================================================================
+# REST API
+# =============================================================================
+
+# REST API bind address
+# Use 127.0.0.1 for localhost-only (recommended for security)
+# Use 0.0.0.0 to allow access from any network interface
+# Default: 127.0.0.1
+rest_api_bind_address 127.0.0.1
+
+# REST API port
+# Default: 5000
+# Note: Currently hardcoded in daemon, this setting may not be honored
+# rest_api_port 5000
+
+# =============================================================================
+# Meadow.Cloud Connection
+# =============================================================================
+
+# MQTT broker address
+# Production: tcp://mqtt.meadowcloud.co
+# Local testing: tcp://localhost (if running local broker)
+# Default: tcp://mqtt.meadowcloud.co
+update_server_address tcp://mqtt.meadowcloud.co
+
+# MQTT broker port
+# Standard MQTT: 1883
+# MQTT over TLS: 8883
+# Default: 1883
+update_server_port 1883
+
+# =============================================================================
+# Authentication
+# =============================================================================
+
+# Use authentication with Meadow.Cloud
+# Set to 'yes' for production (Meadow.Cloud)
+# Set to 'no' for local testing without auth
+# Default: yes
+use_authentication yes
+
+# Authentication server address
+# Default: https://www.meadowcloud.co
+auth_server_address https://www.meadowcloud.co
+
+# Authentication server port
+# Default: 443 (HTTPS)
+auth_server_port 443
+
+# =============================================================================
+# MQTT Topics
+# =============================================================================
+
+# MQTT topics to subscribe to (semicolon-separated)
+# Macros:
+#   {ID}  - Replaced with machine ID from /etc/machine-id
+#   {OID} - Replaced with organization ID from Meadow.Cloud
+# Example: myorg/ota/mydevice
+# Default: {OID}/ota/{ID}
+mqtt_topics {OID}/ota/{ID}
+
+# =============================================================================
+# Application Management
+# =============================================================================
+
+# Is the application managed by systemd?
+# Set to 'yes' if your app runs as a systemd service
+# Set to 'no' if app is a standalone process
+# Default: yes
+app_is_systemd_service yes
+
+# Systemd service name (if app_is_systemd_service is yes)
+# This is the name of your app's systemd service file (without .service extension)
+# Example: meadowapp for /etc/systemd/system/meadowapp.service
+# Default: meadowapp
+app_service_name meadowapp.service
+
+# =============================================================================
+# SSH Keys (for authentication)
+# =============================================================================
+
+# SSH private key location
+# Daemon reads this key for Meadow.Cloud authentication
+# Key MUST be in PEM format (not OpenSSH format)
+# Default: /root/.ssh/id_rsa (since daemon runs as root)
+# Generate with: ssh-keygen -t rsa -b 2048 -m PEM -f ~/.ssh/id_rsa -N ""
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+# Log level (not currently configurable, daemon logs to systemd journal)
+# View logs with: journalctl -u mc-daemon
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+
+# Example 1: Meadow.Core app running as user
+# -------------------------------------------
+# enabled yes
+# enable_mqtt_listener no
+# meadow_root /opt/meadow
+# meadow_temp /home/username/.meadow/tmp
+# app_is_systemd_service yes
+# app_service_name meadowapp.service
+
+# Example 2: Standalone daemon with MQTT (no Meadow.Core)
+# --------------------------------------------------------
+# enabled yes
+# enable_mqtt_listener yes
+# meadow_root /opt/meadow
+# meadow_temp /tmp/meadow
+# app_is_systemd_service yes
+# app_service_name meadowapp.service
+
+# Example 3: Local testing (no cloud)
+# ------------------------------------
+# enabled no
+# meadow_root /opt/meadow
+# meadow_temp /tmp/meadow
+
+# =============================================================================
+# Important Notes
+# =============================================================================
+
+# 1. Environment Variables Override Config File
+#    If systemd service has Environment="MEADOW_TEMP=/some/path",
+#    it will override meadow_temp in this file.
+#    AVOID setting Environment variables in mc-daemon.service!
+
+# 2. Path Ownership
+#    - meadow_root: Can be owned by user (if app runs as user)
+#    - meadow_temp: Should match app user ownership
+#    - SSH keys: Must be readable by root (daemon runs as root)
+
+# 3. Permissions
+#    Create required directories:
+#      mkdir -p ~/.meadow/tmp/{updates,update,staging,rollback}
+#      sudo mkdir -p /opt/meadow
+#      sudo chown $USER:$USER /opt/meadow
+
+# 4. After Editing
+#    Restart daemon to apply changes:
+#      sudo systemctl restart mc-daemon

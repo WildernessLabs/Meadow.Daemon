@@ -1,0 +1,297 @@
+# Meadow Application Configuration
+# Location: Project root (same directory as .csproj)
+#          Also deployed to: /opt/meadow/app.config.yaml
+#
+# This file configures your .NET application's connection to Meadow.Cloud
+# and provides application-level settings.
+#
+# IMPORTANT: This file is read by Meadow.Core at runtime.
+# It must be present in the application's working directory.
+
+# =============================================================================
+# Meadow.Cloud Connection Settings
+# =============================================================================
+
+MeadowCloudSettings:
+  # Enable cloud connectivity
+  # Set to true to connect to Meadow.Cloud for OTA updates
+  # Set to false to disable cloud features
+  Enabled: true
+
+  # MQTT Broker hostname
+  # Production Meadow.Cloud: mqtt.meadowcloud.co
+  # Local testing: localhost
+  MqttHostname: mqtt.meadowcloud.co
+
+  # MQTT Broker port
+  # Standard MQTT: 1883
+  # MQTT over TLS: 8883
+  MqttPort: 1883
+
+  # HTTP API hostname for authentication and data
+  # Production: www.meadowcloud.co
+  DataHostname: www.meadowcloud.co
+
+  # HTTP API port
+  # HTTPS: 443
+  # HTTP: 80
+  DataPort: 443
+
+  # MQTT topic prefix for OTA updates
+  # Macros:
+  #   {ID}  - Replaced with machine ID from /etc/machine-id
+  #   {OID} - Replaced with organization ID from Meadow.Cloud
+  # Example result: myorg123/ota/1c8150f752614dec80f88752256e829f
+  MqttTopicPrefix: "{OID}/ota/{ID}"
+
+# =============================================================================
+# Application Settings
+# =============================================================================
+
+ApplicationSettings:
+  # Application name
+  # Used for identification in logs and Meadow.Cloud
+  Name: "MyAvaloniaApp"
+
+  # Application version
+  # IMPORTANT: Increment this for each OTA update
+  # Meadow.Core uses this to determine if an update is available
+  Version: "1.0.0"
+
+  # Optional: Additional metadata
+  # Description: "My awesome Avalonia application"
+  # Company: "My Company"
+
+# =============================================================================
+# Update Settings (Optional)
+# =============================================================================
+
+# UpdateSettings:
+#   # Check for updates interval (seconds)
+#   # Default: 300 (5 minutes)
+#   CheckInterval: 300
+#
+#   # Auto-download updates
+#   # true: Automatically download when available
+#   # false: Wait for manual trigger
+#   AutoDownload: true
+#
+#   # Auto-apply updates
+#   # true: Automatically exit after download (daemon will apply)
+#   # false: Wait for manual apply trigger
+#   AutoApply: true
+#
+#   # Update staging directory
+#   # Where updates are extracted before daemon applies them
+#   # Should match meadow_temp in /etc/meadow.conf
+#   StagingDirectory: "/home/USERNAME/.meadow/tmp/staging"
+
+# =============================================================================
+# Logging Settings (Optional)
+# =============================================================================
+
+# LoggingSettings:
+#   # Log level: Trace, Debug, Information, Warning, Error, Critical
+#   LogLevel: "Information"
+#
+#   # Log to console (systemd journal)
+#   LogToConsole: true
+#
+#   # Log to file
+#   LogToFile: false
+#   LogFilePath: "/opt/meadow/logs/app.log"
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+
+# Example 1: Production (Meadow.Cloud)
+# -------------------------------------
+# MeadowCloudSettings:
+#   Enabled: true
+#   MqttHostname: mqtt.meadowcloud.co
+#   MqttPort: 1883
+#   DataHostname: www.meadowcloud.co
+#   DataPort: 443
+#   MqttTopicPrefix: "{OID}/ota/{ID}"
+# ApplicationSettings:
+#   Name: "MyAvaloniaApp"
+#   Version: "1.0.0"
+
+# Example 2: Local testing (no cloud)
+# ------------------------------------
+# MeadowCloudSettings:
+#   Enabled: false
+# ApplicationSettings:
+#   Name: "MyAvaloniaApp"
+#   Version: "1.0.0"
+
+# Example 3: Local MQTT broker
+# -----------------------------
+# MeadowCloudSettings:
+#   Enabled: true
+#   MqttHostname: localhost
+#   MqttPort: 1883
+#   DataHostname: localhost
+#   DataPort: 8080
+#   MqttTopicPrefix: "local/ota/testdevice"
+# ApplicationSettings:
+#   Name: "TestApp"
+#   Version: "1.0.0"
+
+# =============================================================================
+# Topic Macros Explained
+# =============================================================================
+
+# The {OID} and {ID} macros in MqttTopicPrefix are automatically replaced:
+#
+# {OID} - Organization ID
+#   - Retrieved from Meadow.Cloud during authentication
+#   - Unique to your organization/account
+#   - Example: "abc123-org"
+#
+# {ID} - Machine ID
+#   - Read from /etc/machine-id
+#   - Unique identifier for this device
+#   - Example: "1c8150f752614dec80f88752256e829f"
+#
+# Full topic example:
+#   Template: {OID}/ota/{ID}
+#   Result:   abc123-org/ota/1c8150f752614dec80f88752256e829f
+#
+# The app subscribes to this topic and receives update notifications when
+# a new version is published to this device via Meadow.Cloud.
+
+# =============================================================================
+# Version Numbering
+# =============================================================================
+
+# Use semantic versioning: MAJOR.MINOR.PATCH
+#
+# Examples:
+#   1.0.0 - Initial release
+#   1.0.1 - Patch (bug fix)
+#   1.1.0 - Minor (new feature, backward compatible)
+#   2.0.0 - Major (breaking changes)
+#
+# IMPORTANT: Meadow.Core compares versions to determine if update is needed.
+# Always increment the version for OTA updates to work!
+
+# =============================================================================
+# Including in Your Project
+# =============================================================================
+
+# Add to your .csproj to ensure this file is copied to output:
+#
+# <ItemGroup>
+#   <None Update="app.config.yaml">
+#     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+#   </None>
+# </ItemGroup>
+#
+# This ensures app.config.yaml is present in:
+#   - bin/Release/net8.0/app.config.yaml (build output)
+#   - /opt/meadow/app.config.yaml (deployed location)
+
+# =============================================================================
+# Reading Configuration in Code
+# =============================================================================
+
+# Meadow.Core automatically loads this configuration:
+#
+# using Meadow;
+# using Meadow.Linux;
+#
+# var builder = MeadowApp.CreateBuilder();
+# builder.UsePlatform<LinuxPlatform>();
+# var app = builder.Build();
+#
+# // Access configuration
+# var version = MeadowApp.Current.AppVersion;  // "1.0.0"
+# var name = MeadowApp.Current.Settings.AppName;  // "MyAvaloniaApp"
+#
+# await app.RunAsync();
+
+# =============================================================================
+# Troubleshooting
+# =============================================================================
+
+# Configuration not loaded:
+#   - Verify file is in working directory: ls /opt/meadow/app.config.yaml
+#   - Check systemd service: WorkingDirectory=/opt/meadow
+#   - Check file permissions: readable by app user
+#   - Check YAML syntax (indentation must be spaces, not tabs)
+#
+# MQTT connection fails:
+#   - Verify Enabled: true
+#   - Check MqttHostname is reachable: ping mqtt.meadowcloud.co
+#   - Verify device is provisioned in Meadow.Cloud
+#   - Check SSH keys exist: ls /root/.ssh/id_rsa*
+#   - View app logs: journalctl -u meadowapp -n 50
+#
+# Updates not detected:
+#   - Verify MqttTopicPrefix matches Meadow.Cloud configuration
+#   - Check machine ID: cat /etc/machine-id
+#   - Ensure Version is incremented in new package
+#   - Check app is subscribed: journalctl -u meadowapp | grep -i subscribed
+#
+# For more help, see: 06-troubleshooting.md
+
+# =============================================================================
+# Important Notes
+# =============================================================================
+
+# 1. File Location
+#    - Must be in application's working directory (/opt/meadow)
+#    - Deployed as part of MPAK package during updates
+#    - Included in project build output
+#
+# 2. YAML Format
+#    - Use spaces for indentation (not tabs)
+#    - Keys are case-sensitive
+#    - Strings can be quoted or unquoted
+#
+# 3. Authentication
+#    - App doesn't directly authenticate (daemon handles SSH key auth)
+#    - App uses MQTT connection established by Meadow.Core
+#    - Device must be provisioned with Meadow.Cloud first
+#
+# 4. OTA Update Flow
+#    - App connects to MQTT broker
+#    - Subscribes to MqttTopicPrefix topic
+#    - Receives update notification
+#    - Downloads MPAK package
+#    - Extracts to staging directory
+#    - Exits (daemon applies update and restarts)
+#
+# 5. Version Management
+#    - Always increment Version for new releases
+#    - Use consistent versioning scheme across team
+#    - Document version changes in release notes
+#    - Old and new versions are in app.config.yaml within their respective MPAKs
+
+# =============================================================================
+# After Editing
+# =============================================================================
+
+# 1. Build and deploy new version:
+#    dotnet publish -c Release -o ./publish
+#    cp -r ./publish/* /opt/meadow/
+#
+# 2. Restart app to pick up changes:
+#    sudo systemctl restart meadowapp
+#
+# 3. Verify configuration loaded:
+#    journalctl -u meadowapp -n 20 | grep -i config
+
+# =============================================================================
+# Security Considerations
+# =============================================================================
+
+# - This file contains no secrets (MQTT connection is authenticated via SSH keys)
+# - Can be safely committed to version control
+# - Each deployment/environment may have different values
+# - Consider using environment-specific config files:
+#   - app.config.dev.yaml (development)
+#   - app.config.staging.yaml (staging)
+#   - app.config.yaml (production)

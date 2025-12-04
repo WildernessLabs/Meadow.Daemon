@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="MyAvaloniaApp.MainWindow"
+        Width="800" Height="600"
+        Title="MyAvaloniaApp">
+    <StackPanel Margin="20">
+        <TextBlock x:Name="Label1" Text="Label 1 initial" FontSize="20"/>
+        <TextBlock x:Name="Label2" Text="Label 2 initial" FontSize="20" Margin="0,10,0,0"/>
+    </StackPanel>
+</Window>
