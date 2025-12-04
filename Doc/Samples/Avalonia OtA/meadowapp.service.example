@@ -1,0 +1,235 @@
+# Meadow Application systemd Service
+# Location: /etc/systemd/system/meadowapp.service
+#
+# This service file runs your Avalonia .NET application with Meadow.Core support.
+# The application handles MQTT connections, update downloads, and GUI display.
+# mc-daemon manages file moves and app restart during OTA updates.
+#
+# IMPORTANT: Replace ALL_CAPS placeholders before using:
+#   - YOUR_USERNAME: Your Linux username (run: whoami)
+#   - YOUR_UID: Your user ID (run: id -u)
+#   - YOUR_APP_NAME: Your application DLL name (e.g., MyAvaloniaApp.dll)
+
+[Unit]
+# Description of your application
+Description=My Avalonia Meadow Application
+
+# Link to documentation (optional)
+Documentation=https://github.com/yourusername/YourApp
+
+# Start after network and mc-daemon are ready
+After=network-online.target mc-daemon.service
+
+# Wait for network to be fully online
+Wants=network-online.target
+
+# Require mc-daemon to be running
+# If mc-daemon stops, this service will also stop
+Requires=mc-daemon.service
+
+[Service]
+# Service type
+# 'simple' means ExecStart is the main process
+Type=simple
+
+# User and group to run the application
+# IMPORTANT: Run as your user (NOT root) for display access
+# Replace YOUR_USERNAME with your actual username
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+
+# Working directory (where app.config.yaml and DLLs are located)
+# This MUST match meadow_root in /etc/meadow.conf
+WorkingDirectory=/opt/meadow
+
+# Command to start the application
+# Replace YOUR_APP_NAME.dll with your actual DLL name
+ExecStart=/usr/bin/dotnet /opt/meadow/YOUR_APP_NAME.dll
+
+# Restart policy
+# 'no' - Do NOT auto-restart (mc-daemon handles restart after updates)
+# IMPORTANT: Must be 'no' to prevent systemd from restarting
+#            before daemon finishes applying updates
+Restart=no
+
+# Restart delay (if Restart were enabled)
+RestartSec=10
+
+# =============================================================================
+# Display Environment (CRITICAL for GUI apps)
+# =============================================================================
+
+# X11 Display
+# :0 is the default display on WSL2
+# If GUI doesn't appear, try :1 or hostname:0
+Environment="DISPLAY=:0"
+
+# X11 Authentication
+# Path to .Xauthority file for your user
+# Replace YOUR_USERNAME with your actual username
+Environment="XAUTHORITY=/home/YOUR_USERNAME/.Xauthority"
+
+# XDG Runtime Directory
+# Required by some GUI frameworks
+# Replace YOUR_UID with your user ID (usually 1000 for first user)
+# Find with: id -u
+Environment="XDG_RUNTIME_DIR=/run/user/YOUR_UID"
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+# Send stdout to systemd journal
+StandardOutput=journal
+
+# Send stderr to systemd journal
+StandardError=journal
+
+# Identifier for logs (appears in journalctl)
+SyslogIdentifier=meadowapp
+
+# =============================================================================
+# Security Hardening
+# =============================================================================
+
+# Prevent privilege escalation
+NoNewPrivileges=true
+
+# Note: More restrictive options (like ProtectSystem, ProtectHome)
+# may interfere with GUI display access. Use minimal hardening for GUI apps.
+
+# =============================================================================
+# Resource Limits (Optional)
+# =============================================================================
+
+# Uncomment to set memory limit
+# MemoryMax=512M
+
+# Uncomment to set CPU quota (50% of one core)
+# CPUQuota=50%
+
+# Uncomment to set maximum number of tasks (processes/threads)
+# TasksMax=100
+
+[Install]
+# Target to enable this service for
+# 'graphical.target' ensures GUI environment is available
+# Use 'multi-user.target' for headless/non-GUI apps
+WantedBy=graphical.target
+
+# =============================================================================
+# Installation and Management
+# =============================================================================
+
+# Install this service:
+#   sudo cp meadowapp.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable meadowapp
+#   sudo systemctl start meadowapp
+
+# Check status:
+#   systemctl status meadowapp
+
+# View logs:
+#   journalctl -u meadowapp -f
+
+# Restart:
+#   sudo systemctl restart meadowapp
+
+# Stop:
+#   sudo systemctl stop meadowapp
+
+# Disable auto-start:
+#   sudo systemctl disable meadowapp
+
+# =============================================================================
+# Example Configurations
+# =============================================================================
+
+# Example 1: User 'ctacke' with UID 1000, app MyAvaloniaApp
+# ----------------------------------------------------------
+# User=ctacke
+# Group=ctacke
+# ExecStart=/usr/bin/dotnet /opt/meadow/MyAvaloniaApp.dll
+# Environment="XAUTHORITY=/home/ctacke/.Xauthority"
+# Environment="XDG_RUNTIME_DIR=/run/user/1000"
+
+# Example 2: User 'bob' with UID 1001, app WeatherStation
+# --------------------------------------------------------
+# User=bob
+# Group=bob
+# ExecStart=/usr/bin/dotnet /opt/meadow/WeatherStation.dll
+# Environment="XAUTHORITY=/home/bob/.Xauthority"
+# Environment="XDG_RUNTIME_DIR=/run/user/1001"
+
+# =============================================================================
+# Troubleshooting Display Issues
+# =============================================================================
+
+# If GUI doesn't appear:
+#
+# 1. Verify DISPLAY value:
+#    - Try: :0, :1, or $(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
+#    - Test with: DISPLAY=:0 xclock
+#
+# 2. Check .Xauthority exists:
+#    ls -la ~/.Xauthority
+#    If missing: touch ~/.Xauthority && chmod 600 ~/.Xauthority
+#
+# 3. Verify XDG_RUNTIME_DIR:
+#    ls -ld /run/user/YOUR_UID
+#    Should exist and be owned by your user
+#
+# 4. Check user matches:
+#    systemctl show meadowapp -p User
+#    Should match your username
+#
+# 5. Windows 11: WSLg is built-in, should work automatically
+#    Windows 10: Install VcXsrv or Xming, configure DISPLAY
+#
+# For more help, see: 06-troubleshooting.md
+
+# =============================================================================
+# OTA Update Workflow
+# =============================================================================
+
+# During an OTA update:
+#
+# 1. App (Meadow.Core) receives MQTT notification from Meadow.Cloud
+# 2. App downloads MPAK package
+# 3. App extracts package to staging directory (~/.meadow/tmp/staging/)
+# 4. App exits (Restart=no prevents systemd from restarting immediately)
+# 5. mc-daemon detects app exit
+# 6. mc-daemon moves files from staging to /opt/meadow
+# 7. mc-daemon restarts app with: systemctl start meadowapp.service
+# 8. App starts with new version
+#
+# This is why Restart=no is CRITICAL - it allows the daemon to apply updates
+# before systemd restarts the app.
+
+# =============================================================================
+# Important Notes
+# =============================================================================
+
+# 1. Environment Variables
+#    - Only set environment variables that are truly needed
+#    - Avoid setting MEADOW_* variables here (let app read from config file)
+#    - Display variables (DISPLAY, XAUTHORITY, XDG_RUNTIME_DIR) are required for GUI
+#
+# 2. User Permissions
+#    - User must own /opt/meadow: sudo chown -R username:username /opt/meadow
+#    - User must own staging dirs: chown -R username:username ~/.meadow
+#    - .Xauthority must be readable by user
+#
+# 3. Restart Policy
+#    - MUST be 'no' for OTA updates to work correctly
+#    - mc-daemon is responsible for restart, not systemd
+#
+# 4. Dependencies
+#    - Requires mc-daemon to be running
+#    - Requires network to be online
+#    - Requires graphical.target (for GUI)
+#
+# 5. After Editing
+#    sudo systemctl daemon-reload
+#    sudo systemctl restart meadowapp
