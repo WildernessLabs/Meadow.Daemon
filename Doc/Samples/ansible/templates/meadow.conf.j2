@@ -1,0 +1,79 @@
+# Meadow.Daemon Configuration
+# Location: /etc/meadow.conf
+#
+# Deployed via Ansible - Do not edit manually
+# Configuration managed by: mc-daemon-playbook.yaml
+
+# =============================================================================
+# Cloud Connectivity
+# =============================================================================
+
+# Enable cloud connection (required for OTA updates)
+enabled yes
+
+# Disable MQTT listener - Meadow.Core in your app handles MQTT
+# Set to 'yes' only if daemon should handle MQTT (standalone mode)
+enable_mqtt_listener no
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+# Application deployment directory
+# This is where your app runs and where updates are applied
+meadow_root {{ meadow_root }}
+
+# Temporary directory for downloads and staging
+meadow_temp {{ meadow_temp_base }}/tmp
+
+# =============================================================================
+# REST API
+# =============================================================================
+
+# REST API bind address
+# Use 127.0.0.1 for localhost-only (recommended for security)
+# Use 0.0.0.0 to allow access from any network interface
+rest_api_bind_address 127.0.0.1
+
+# =============================================================================
+# Meadow.Cloud Connection
+# =============================================================================
+
+# MQTT broker address
+update_server_address tcp://mqtt.meadowcloud.co
+
+# MQTT broker port
+update_server_port 1883
+
+# =============================================================================
+# Authentication
+# =============================================================================
+
+# Use authentication with Meadow.Cloud
+use_authentication yes
+
+# Authentication server address
+auth_server_address https://www.meadowcloud.co
+
+# Authentication server port
+auth_server_port 443
+
+# =============================================================================
+# MQTT Topics
+# =============================================================================
+
+# MQTT topics to subscribe to
+# Macros:
+#   {ID}  - Replaced with machine ID from /etc/machine-id
+#   {OID} - Replaced with organization ID from Meadow.Cloud
+mqtt_topics {OID}/ota/{ID}
+
+# =============================================================================
+# Application Management
+# =============================================================================
+
+# Is the application managed by systemd?
+app_is_systemd_service yes
+
+# Systemd service name
+app_service_name {{ app_service_name }}

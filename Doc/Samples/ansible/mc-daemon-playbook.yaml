@@ -1,0 +1,243 @@
+---
+- name: Deploy Meadow.Cloud Daemon and .NET 8 Runtime
+  hosts: meadow_devices
+  become: yes
+
+  vars:
+    # User that will run the application (change as needed)
+    meadow_user: "{{ ansible_user }}"
+    meadow_group: "{{ ansible_user }}"
+
+    # Installation paths
+    meadow_root: /opt/meadow
+    meadow_temp_base: "/home/{{ meadow_user }}/.meadow"
+
+    # Service name for your application
+    app_service_name: meadowapp.service
+
+  tasks:
+    # =========================================================================
+    # Architecture Detection
+    # =========================================================================
+    - name: Detect system architecture
+      set_fact:
+        mc_daemon_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+
+    - name: Display detected architecture
+      debug:
+        msg: "Detected architecture: {{ ansible_architecture }} -> mc-daemon-{{ mc_daemon_arch }}"
+
+    # =========================================================================
+    # Install .NET 8 Runtime
+    # =========================================================================
+    - name: Install wget (required for dotnet-install script)
+      apt:
+        name: wget
+        state: present
+        update_cache: yes
+
+    - name: Create temp directory for .NET installation
+      file:
+        path: "/home/{{ meadow_user }}/tmp"
+        state: directory
+        owner: "{{ meadow_user }}"
+        group: "{{ meadow_group }}"
+        mode: '0755'
+      become_user: "{{ meadow_user }}"
+
+    - name: Check if .NET is already installed
+      stat:
+        path: "/home/{{ meadow_user }}/.dotnet/dotnet"
+      register: dotnet_installed
+
+    - name: Download and install .NET 8 ASP.NET Core Runtime
+      shell: |
+        export TMPDIR=$HOME/tmp
+        wget --inet4-only https://dot.net/v1/dotnet-install.sh -O - | bash /dev/stdin --runtime aspnetcore --version 8.0.22
+      args:
+        creates: "/home/{{ meadow_user }}/.dotnet/dotnet"
+      become_user: "{{ meadow_user }}"
+      environment:
+        HOME: "/home/{{ meadow_user }}"
+
+    - name: Add DOTNET_ROOT to .bashrc
+      lineinfile:
+        path: "/home/{{ meadow_user }}/.bashrc"
+        line: "export DOTNET_ROOT=$HOME/.dotnet"
+        create: yes
+        owner: "{{ meadow_user }}"
+        group: "{{ meadow_group }}"
+      become_user: "{{ meadow_user }}"
+
+    - name: Add .NET to PATH in .bashrc
+      lineinfile:
+        path: "/home/{{ meadow_user }}/.bashrc"
+        line: "export PATH=$PATH:$HOME/.dotnet"
+        create: yes
+        owner: "{{ meadow_user }}"
+        group: "{{ meadow_group }}"
+      become_user: "{{ meadow_user }}"
+
+    - name: Verify .NET installation
+      command: "/home/{{ meadow_user }}/.dotnet/dotnet --list-runtimes"
+      register: dotnet_runtimes
+      changed_when: false
+      become_user: "{{ meadow_user }}"
+      environment:
+        DOTNET_ROOT: "/home/{{ meadow_user }}/.dotnet"
+
+    - name: Display installed .NET runtimes
+      debug:
+        var: dotnet_runtimes.stdout_lines
+
+    # =========================================================================
+    # Download and Install mc-daemon Binary
+    # =========================================================================
+    - name: Check the latest mc-daemon release
+      uri:
+        url: https://api.github.com/repos/WildernessLabs/Meadow.Daemon/releases/latest
+        method: GET
+      register: mc_daemon_release
+      delegate_to: localhost
+      become: no
+
+    - name: Set release facts based on architecture
+      set_fact:
+        daemon_binary_name: "mc-daemon-{{ mc_daemon_arch }}"
+        daemon_asset: "{{ mc_daemon_release.json | to_json | from_json | json_query(jmespath_query) | first }}"
+      vars:
+        jmespath_query: "assets[?name=='mc-daemon-{{ mc_daemon_arch }}']"
+
+    - name: Display download information
+      debug:
+        msg: "Downloading {{ daemon_asset.name }} ({{ (daemon_asset.size / 1024 / 1024) | round(1) }} MB)"
+
+    - name: Download mc-daemon binary
+      get_url:
+        url: "{{ daemon_asset.browser_download_url }}"
+        dest: /tmp/mc-daemon
+        mode: '0755'
+
+    - name: Install mc-daemon to /usr/bin
+      copy:
+        src: /tmp/mc-daemon
+        dest: /usr/bin/mc-daemon
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Verify mc-daemon binary exists and is executable
+      stat:
+        path: /usr/bin/mc-daemon
+      register: daemon_binary
+
+    - name: Display mc-daemon binary info
+      debug:
+        msg: "mc-daemon installed at /usr/bin/mc-daemon ({{ (daemon_binary.stat.size / 1024 / 1024) | round(1) }} MB)"
+      when: daemon_binary.stat.exists
+
+    # =========================================================================
+    # Create Directory Structure
+    # =========================================================================
+    - name: Create Meadow application directory
+      file:
+        path: "{{ meadow_root }}"
+        state: directory
+        owner: "{{ meadow_user }}"
+        group: "{{ meadow_group }}"
+        mode: '0755'
+
+    - name: Create Meadow temp directories
+      file:
+        path: "{{ meadow_temp_base }}/tmp/{{ item }}"
+        state: directory
+        owner: "{{ meadow_user }}"
+        group: "{{ meadow_group }}"
+        mode: '0755'
+      loop:
+        - updates
+        - update
+        - staging
+        - rollback
+      become_user: "{{ meadow_user }}"
+
+    # =========================================================================
+    # Configure meadow.conf
+    # =========================================================================
+    - name: Create /etc/meadow.conf
+      template:
+        src: templates/meadow.conf.j2
+        dest: /etc/meadow.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart mc-daemon
+
+    # =========================================================================
+    # Configure systemd Service
+    # =========================================================================
+    - name: Create mc-daemon systemd service file
+      template:
+        src: templates/mc-daemon.service.j2
+        dest: /etc/systemd/system/mc-daemon.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart mc-daemon
+
+    - name: Enable mc-daemon service
+      systemd:
+        name: mc-daemon
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Start mc-daemon service
+      systemd:
+        name: mc-daemon
+        state: started
+
+    # =========================================================================
+    # Verify Installation
+    # =========================================================================
+    - name: Wait for mc-daemon to start
+      wait_for:
+        port: 5000
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Check mc-daemon API
+      uri:
+        url: http://127.0.0.1:5000/api/info
+        method: GET
+      register: daemon_info
+      failed_when: false
+
+    - name: Display daemon info
+      debug:
+        var: daemon_info.json
+      when: daemon_info.status == 200
+
+    - name: Check mc-daemon service status
+      systemd:
+        name: mc-daemon
+      register: daemon_status
+
+    - name: Display service status
+      debug:
+        msg: "mc-daemon is {{ daemon_status.status.ActiveState }}"
+
+  # ===========================================================================
+  # Handlers
+  # ===========================================================================
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart mc-daemon
+      systemd:
+        name: mc-daemon
+        state: restarted

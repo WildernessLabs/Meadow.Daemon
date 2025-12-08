@@ -1,0 +1,38 @@
+# Ansible Inventory for Meadow.Daemon Deployment
+# Copy this file to inventory.yaml and customize for your environment
+
+all:
+  children:
+    raspberry_pi:
+      hosts:
+        # Example: Single Raspberry Pi
+        pi1:
+          ansible_host: 192.168.1.100
+          ansible_user: pi
+          ansible_ssh_private_key_file: ~/.ssh/id_rsa
+
+        # Add more Raspberry Pis as needed
+        # pi2:
+        #   ansible_host: 192.168.1.101
+        #   ansible_user: pi
+
+    amd64_servers:
+      hosts:
+        # Example: AMD64 server
+        # server1:
+        #   ansible_host: 192.168.1.200
+        #   ansible_user: meadow
+
+    # Group all Meadow devices together
+    meadow_devices:
+      children:
+        raspberry_pi:
+        amd64_servers:
+      vars:
+        # Common variables for all Meadow devices
+        ansible_python_interpreter: /usr/bin/python3
+
+        # Customize these if needed (override the playbook defaults)
+        # meadow_user: meadow
+        # meadow_root: /opt/meadow
+        # app_service_name: meadowapp.service
